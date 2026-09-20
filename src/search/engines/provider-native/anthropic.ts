@@ -12,8 +12,8 @@ import type { SearchSource } from '../../../types.ts'
 import type { EngineSearchResult, SearchEngine, SearchEngineDeps } from '../types.ts'
 import { asString, providerJson } from './common.ts'
 
-/** Default endpoint bases (the DeepSeek base is the Anthropic-compatible API, `/v1` included). */
-export const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com'
+/** Default endpoint bases (`/v1` included in each; `/messages` is appended). */
+export const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com/v1'
 export const DEEPSEEK_DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic/v1'
 
 /** Default models (may age — configure explicitly in production). */

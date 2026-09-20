@@ -67,7 +67,7 @@ export class GeminiEngine implements SearchEngine {
         env: 'GEMINI_API_KEY',
       })
       if (resolved !== undefined && resolved.length > 0) key = resolved
-      else if (key.length === 0) key = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'] ?? ''
+      else if (key.length === 0) key = process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || ''
     }
     if (key.length === 0) {
       throw new CoreError('the gemini engine is enabled, but no API key is available (config, credentials, or GEMINI_API_KEY/GOOGLE_API_KEY)', 'WEB_AUTH')
