@@ -35,7 +35,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "cheerio": "^1.0.0"
+    "cheerio": "^1.0.0",
+    "unpdf": "^1.8.1"
   },
   "optionalDependencies": {
     "playwright": "^1.61.0"

@@ -22,6 +22,7 @@ import { CoreError } from '../errors.ts'
 import type { FetchBody, FetchRequest, FetchResult } from '../types.ts'
 import { deadline, timeoutOf } from '../timeout.ts'
 import type { StoredPage, WebStore } from '../store/index.ts'
+import { extractPdfToMarkdown, type PdfLimits } from './pdf.ts'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
 import { normalizeUrl } from './url.ts'
 import { checkSsrf } from './ssrf.ts'
@@ -53,6 +54,12 @@ export interface CachedFetchLimits {
    * network-isolated environment (e.g. a container with no internal routes).
    */
   allowPrivateNetworks: boolean
+  /**
+   * PDF extraction (roadmap 5.1). `application/pdf` responses are extracted
+   * to markdown (body kind `text`, cached like any page) instead of failing
+   * with `WEB_UNSUPPORTED_CONTENT_TYPE` when `enabled`.
+   */
+  pdf: PdfLimits
 }
 
 /** Stable id this provider registers under. */
@@ -87,7 +94,7 @@ export class CachedHttpFetchProvider {
     if (cached !== undefined) {
       if (Date.now() - cached.fetchedAt < this.limits.cacheTtlMs) {
         // Fresh: serve from cache with no network round-trip.
-        return cloneResult(pageToResult(cached))
+        return cloneResult(cachedResult(cached))
       }
       // Expired: conditional revalidation when enabled — a 304 serves the
       // stale body, a changed body falls through to a full fetch, and a
@@ -157,12 +164,12 @@ export class CachedHttpFetchProvider {
     } catch (error: unknown) {
       const translated = translateAbortOrNetwork(error, d.signal)
       if (translated.code === 'WEB_ABORTED' || translated.code === 'WEB_FETCH_TIMEOUT') throw translated
-      return cloneResult(pageToResult(cached))
+      return cloneResult(cachedResult(cached))
     }
     if (response.status === 304) {
       await response.body?.cancel()
       await this.limits.store.refreshPage(key, Date.now(), cached.etag, cached.lastModified).catch(() => undefined)
-      return cloneResult(pageToResult(cached))
+      return cloneResult(cachedResult(cached))
     }
     if (response.status >= 200 && response.status < 300) {
       // The conditional request already carries the new body: read and
@@ -255,7 +262,25 @@ export class CachedHttpFetchProvider {
   /** Read, byte-cap, classify, and decode the final response body. */
   private async readBody(response: Response, finalUrl: URL, signal: AbortSignal): Promise<FetchResult> {
     const contentType = response.headers.get('content-type')
+    const mime = (contentType ?? '').replace(/;.*$/s, '').trim().toLowerCase()
     const kind = classifyContentType(contentType)
+
+    // PDF branch (5.1): extract to markdown when the feature is on. The PDF
+    // gets its own (larger) byte cap; the extracted markdown then flows
+    // through the regular char cap and is cached as a `text` page.
+    if (mime === 'application/pdf' && this.limits.pdf.enabled) {
+      const { bytes, truncatedByBytes } = await this.readCapped(response, signal, this.limits.pdf.maxSizeBytes)
+      const { markdown } = await extractPdfToMarkdown(bytes, finalUrl.toString(), this.limits.pdf)
+      const truncatedByChars = markdown.length > this.limits.maxBodyChars
+      const content = truncatedByChars ? markdown.slice(0, this.limits.maxBodyChars) : markdown
+      return {
+        url: finalUrl.toString(),
+        statusCode: response.status,
+        body: { kind: 'text', content },
+        truncated: truncatedByBytes || truncatedByChars,
+      }
+    }
+
     if (kind === undefined) {
       await response.body?.cancel()
       throw new CoreError(`unsupported content type "${contentType ?? 'unknown'}"`, 'WEB_UNSUPPORTED_CONTENT_TYPE')
@@ -283,17 +308,18 @@ export class CachedHttpFetchProvider {
   }
 
   /**
-   * Read the response stream up to `maxResponseBytes`. A `Content-Length` over
-   * the cap rejects immediately with `WEB_FETCH_TOO_LARGE`; a stream that grows
+   * Read the response stream up to `maxBytes`. A `Content-Length` over the
+   * cap rejects immediately with `WEB_FETCH_TOO_LARGE`; a stream that grows
    * past the cap is cut short (`truncatedByBytes`) rather than rejected.
    */
-  private async readCapped(response: Response, signal: AbortSignal): Promise<{ bytes: Uint8Array; truncatedByBytes: boolean }> {
+  private async readCapped(response: Response, signal: AbortSignal, maxBytes?: number): Promise<{ bytes: Uint8Array; truncatedByBytes: boolean }> {
+    const cap = maxBytes ?? this.limits.maxResponseBytes
     const declared = response.headers.get('content-length')
     if (declared !== null) {
       const length = Number(declared)
-      if (Number.isFinite(length) && length > this.limits.maxResponseBytes) {
+      if (Number.isFinite(length) && length > cap) {
         await response.body?.cancel()
-        throw new CoreError(`response exceeds the maximum of ${this.limits.maxResponseBytes} bytes`, 'WEB_FETCH_TOO_LARGE')
+        throw new CoreError(`response exceeds the maximum of ${cap} bytes`, 'WEB_FETCH_TOO_LARGE')
       }
     }
 
@@ -308,7 +334,7 @@ export class CachedHttpFetchProvider {
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
-        const remaining = this.limits.maxResponseBytes - total
+        const remaining = cap - total
         if (value.byteLength > remaining) {
           chunks.push(value.subarray(0, remaining))
           total += remaining
@@ -383,7 +409,12 @@ function pageToResult(page: { url: string; statusCode: number; bodyKind: 'html' 
   }
 }
 
+/** A cache-hit result (carries `fromCache: true` for tool output headers). */
+function cachedResult(page: Parameters<typeof pageToResult>[0]): FetchResult {
+  return { ...pageToResult(page), fromCache: true }
+}
+
 /** Defensive copy so callers never mutate the cached result. */
 function cloneResult(result: FetchResult): FetchResult {
-  return { url: result.url, statusCode: result.statusCode, body: { ...result.body }, truncated: result.truncated }
+  return { ...result, body: { ...result.body } }
 }

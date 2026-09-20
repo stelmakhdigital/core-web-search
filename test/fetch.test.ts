@@ -9,6 +9,7 @@ vi.mock('node:dns/promises', () => ({
 import { CachedHttpFetchProvider } from '../src/fetch/provider.ts'
 import { normalizeUrl } from '../src/fetch/url.ts'
 import { WebStore } from '../src/store/index.ts'
+import { makePdf } from './fixtures/pdf.ts'
 
 import { lookup } from 'node:dns/promises'
 const mockLookup = vi.mocked(lookup)
@@ -37,14 +38,15 @@ function makeProvider(store: WebStore, overrides: Record<string, unknown> = {}):
     store,
     revalidate: true,
     allowPrivateNetworks: false,
+    pdf: { enabled: true, maxSizeBytes: 2_000_000, maxPages: 5 },
     ...overrides,
   })
 }
 
 /** Minimal Response stand-in with a real Headers and a one-chunk body stream. */
-function fakeResponse(opts: { status?: number; body?: string; headers?: Record<string, string> }): Response {
+function fakeResponse(opts: { status?: number; body?: string; bytes?: Uint8Array; headers?: Record<string, string> }): Response {
   const status = opts.status ?? 200
-  const bytes = new TextEncoder().encode(opts.body ?? '')
+  const bytes = opts.bytes !== undefined ? opts.bytes : new TextEncoder().encode(opts.body ?? '')
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(bytes)
@@ -211,6 +213,89 @@ describe('CachedHttpFetchProvider — cache behavior', () => {
     expect(result.statusCode).toBe(404)
     const cached = await store.readPage(normalizeUrl('https://example.com/missing'))
     expect(cached).toBeUndefined()
+    await store.close()
+  })
+})
+
+describe('CachedHttpFetchProvider — PDF extraction (5.1)', () => {
+  it('extracts application/pdf to markdown (kind text) and caches the result', async () => {
+    const store = makeStore()
+    const pdf = makePdf(['First page text', 'Second page text'])
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(fakeResponse({ status: 200, bytes: pdf, headers: { 'content-type': 'application/pdf' } })),
+    )
+    const provider = makeProvider(store)
+    const result = await provider.fetch({ url: 'https://example.com/docs/report.pdf' })
+    expect(result.body.kind).toBe('text')
+    const markdown = result.body.content
+    expect(markdown).toContain('# report')
+    expect(markdown).toContain('https://example.com/docs/report.pdf (PDF, 2 pages)')
+    expect(markdown).toContain('## Page 1')
+    expect(markdown).toContain('First page text')
+    expect(markdown).toContain('## Page 2')
+    expect(markdown).toContain('Second page text')
+    const cached = await store.readPage(normalizeUrl('https://example.com/docs/report.pdf'))
+    expect(cached?.bodyKind).toBe('text')
+    // A fresh re-fetch is served from the cache without a network call.
+    const again = await provider.fetch({ url: 'https://example.com/docs/report.pdf' })
+    expect(again.fromCache).toBe(true)
+    expect(again.body.content).toBe(markdown)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await store.close()
+  })
+
+  it('refuses PDFs when fetch.pdf.enabled is false (WEB_UNSUPPORTED_CONTENT_TYPE)', async () => {
+    const store = makeStore()
+    const pdf = makePdf(['nope'])
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(fakeResponse({ status: 200, bytes: pdf, headers: { 'content-type': 'application/pdf' } })),
+    )
+    const provider = makeProvider(store, { pdf: { enabled: false, maxSizeBytes: 2_000_000, maxPages: 5 } })
+    await expect(provider.fetch({ url: 'https://example.com/doc.pdf' })).rejects.toMatchObject({ code: 'WEB_UNSUPPORTED_CONTENT_TYPE' })
+    await store.close()
+  })
+
+  it('enforces the PDF byte cap (WEB_FETCH_TOO_LARGE, no network drain)', async () => {
+    const store = makeStore()
+    const pdf = makePdf(['big'])
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        fakeResponse({
+          status: 200,
+          bytes: pdf,
+          headers: { 'content-type': 'application/pdf', 'content-length': String(pdf.byteLength + 1) },
+        }),
+      ),
+    )
+    const provider = makeProvider(store, { pdf: { enabled: true, maxSizeBytes: 10, maxPages: 5 } })
+    await expect(provider.fetch({ url: 'https://example.com/doc.pdf' })).rejects.toMatchObject({ code: 'WEB_FETCH_TOO_LARGE' })
+    await store.close()
+  })
+
+  it('fails corrupt PDF bytes with WEB_PARSE_ERROR', async () => {
+    const store = makeStore()
+    const junk = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x48, 0x65, 0x6c, 0x6c, 0x6f])
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(fakeResponse({ status: 200, bytes: junk, headers: { 'content-type': 'application/pdf' } })),
+    )
+    const provider = makeProvider(store)
+    await expect(provider.fetch({ url: 'https://example.com/broken.pdf' })).rejects.toMatchObject({ code: 'WEB_PARSE_ERROR' })
+    await store.close()
+  })
+
+  it('slices extraction to the first maxPages pages', async () => {
+    const store = makeStore()
+    const pdf = makePdf(['page one', 'page two', 'page three'])
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(fakeResponse({ status: 200, bytes: pdf, headers: { 'content-type': 'application/pdf' } })),
+    )
+    const provider = makeProvider(store, { pdf: { enabled: true, maxSizeBytes: 2_000_000, maxPages: 2 } })
+    const result = await provider.fetch({ url: 'https://example.com/multi.pdf' })
+    const markdown = result.body.content
+    expect(markdown).toContain('page one')
+    expect(markdown).toContain('page two')
+    expect(markdown).not.toContain('page three')
+    expect(markdown).toContain('3 pages; showing the first 2')
     await store.close()
   })
 })

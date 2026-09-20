@@ -1,15 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildCoreTools, type ToolHost } from '../src/tools/index.ts'
 import { WebStore } from '../src/store/index.ts'
 import { resolveCoreConfig } from '../src/config.ts'
 import { CoreError } from '../src/errors.ts'
-import type { FetchResult, PlatformSearchResult, SearchResult } from '../src/types.ts'
+import type { FetchResult, LlmClient, PlatformSearchResult, SearchResult } from '../src/types.ts'
 
 function makeHost(overrides: {
   search?: (request: unknown) => Promise<SearchResult>
   fetch?: (request: { url: string }) => Promise<FetchResult>
   platform?: (request: unknown) => Promise<PlatformSearchResult>
   platformsEnabled?: boolean
+  llm?: LlmClient
 } = {}): { host: ToolHost; store: WebStore } {
   const store = new WebStore({ path: ':memory:' })
   const config = resolveCoreConfig({ platforms: { enabled: overrides.platformsEnabled ?? true } }, '/tmp')
@@ -19,6 +20,7 @@ function makeHost(overrides: {
     search: overrides.search ?? (async () => ({ sources: [], truncated: false })),
     fetch: overrides.fetch ?? (async () => ({ url: 'https://example.com', statusCode: 200, body: { kind: 'text', content: 'hi' }, truncated: false })),
     platformSearch: overrides.platform ?? (async () => ({ platform: 'github', query: 'q', sources: [], truncated: false })),
+    llm: overrides.llm,
   }
   return { host, store }
 }
@@ -149,6 +151,86 @@ describe('buildCoreTools', () => {
     const out = await spec.execute({ url: 'https://example.com' }, noop)
     expect(out.text).toContain('[...truncated...]')
     expect((out.details as { truncated: boolean }).truncated).toBe(true)
+  })
+
+  describe('web_fetch question mode (5.1)', () => {
+    const pdfContent = '# report\n\n## Page 1\n\nThe answer is 42. Second page.'
+
+    it('answers from the fetched document via the host LLM', async () => {
+      const complete = vi.fn(async (req: { prompt: string }) => {
+        expect(req.prompt).toContain('The answer is 42')
+        expect(req.prompt).toContain('Question: what is the answer?')
+        return { text: 'The answer is 42.', model: 'test-model' }
+      })
+      const { host } = makeHost({
+        fetch: async () => ({
+          url: 'https://example.com/r.pdf',
+          statusCode: 200,
+          body: { kind: 'text', content: pdfContent },
+          truncated: false,
+        }),
+        llm: { complete } satisfies LlmClient,
+      })
+      const spec = buildCoreTools(host).find((tool) => tool.name === 'web_fetch')!
+      const out = await spec.execute({ url: 'https://example.com/r.pdf', question: 'what is the answer?' }, noop)
+      expect(out.isError).toBeFalsy()
+      expect(out.text).toContain('Answer to "what is the answer?"')
+      expect(out.text).toContain('The answer is 42.')
+      expect(out.text).toContain('(model: test-model)')
+      expect((out.details as { model: string }).model).toBe('test-model')
+      expect(complete).toHaveBeenCalledTimes(1)
+    })
+
+    it('fails closed with WEB_NOT_AVAILABLE when the host has no LLM client', async () => {
+      const { host } = makeHost({
+        fetch: async () => ({
+          url: 'https://example.com/r.pdf',
+          statusCode: 200,
+          body: { kind: 'text', content: pdfContent },
+          truncated: false,
+        }),
+      })
+      const spec = buildCoreTools(host).find((tool) => tool.name === 'web_fetch')!
+      const out = await spec.execute({ url: 'https://example.com/r.pdf', question: 'what is the answer?' }, noop)
+      expect(out.isError).toBe(true)
+      expect(out.text).toContain('Error (WEB_NOT_AVAILABLE)')
+      expect(out.text).toContain('HostAdapter.llm')
+    })
+
+    it('ignores the question in raw mode (no LLM call)', async () => {
+      const complete = vi.fn()
+      const { host } = makeHost({
+        fetch: async () => ({
+          url: 'https://example.com/raw.pdf',
+          statusCode: 200,
+          body: { kind: 'text', content: pdfContent },
+          truncated: false,
+        }),
+        llm: { complete } as LlmClient,
+      })
+      const spec = buildCoreTools(host).find((tool) => tool.name === 'web_fetch')!
+      const out = await spec.execute({ url: 'https://example.com/raw.pdf', mode: 'raw', question: 'x' }, noop)
+      expect(out.isError).toBeFalsy()
+      expect(out.text).toContain('## Page 1')
+      expect(complete).not.toHaveBeenCalled()
+    })
+
+    it('does not call the LLM without a question', async () => {
+      const complete = vi.fn()
+      const { host } = makeHost({
+        fetch: async () => ({
+          url: 'https://example.com/r.pdf',
+          statusCode: 200,
+          body: { kind: 'text', content: pdfContent },
+          truncated: false,
+        }),
+        llm: { complete } as LlmClient,
+      })
+      const spec = buildCoreTools(host).find((tool) => tool.name === 'web_fetch')!
+      const out = await spec.execute({ url: 'https://example.com/r.pdf' }, noop)
+      expect(out.isError).toBeFalsy()
+      expect(complete).not.toHaveBeenCalled()
+    })
   })
 
   it('web_platform_search formats sources', async () => {

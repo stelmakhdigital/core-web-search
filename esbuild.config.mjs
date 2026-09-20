@@ -11,7 +11,7 @@ const root = dirname(fileURLToPath(import.meta.url))
 
 // Third-party deps that stay external (resolved from node_modules at runtime).
 // `playwright` is optional (browser module, disabled by default).
-const externalThirdParty = ['cheerio', 'playwright']
+const externalThirdParty = ['cheerio', 'playwright', 'unpdf']
 
 await build({
   entryPoints: [join(root, 'src/index.ts')],

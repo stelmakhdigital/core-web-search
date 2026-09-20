@@ -49,6 +49,12 @@ export interface ResolvedCoreConfig {
     readonly timeoutMs: number
     readonly maxRedirects: number
     readonly allowPrivateNetworks: boolean
+    /** PDF extraction (resolved). */
+    readonly pdf: {
+      readonly enabled: boolean
+      readonly maxSizeBytes: number
+      readonly maxPages: number
+    }
   }
   readonly platforms: {
     readonly enabled: boolean
@@ -167,6 +173,11 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
     timeoutMs: f.timeoutMs ?? 30_000,
     maxRedirects: f.maxRedirects ?? 5,
     allowPrivateNetworks: f.allowPrivateNetworks ?? false,
+    pdf: {
+      enabled: f.pdf?.enabled ?? true,
+      maxSizeBytes: f.pdf?.maxSizeBytes ?? 20 * 1024 * 1024,
+      maxPages: f.pdf?.maxPages ?? 50,
+    },
   }
   assertPositiveInt('fetch.cacheTtlMs', fetch.cacheTtlMs)
   assertPositiveInt('fetch.maxBodyBytes', fetch.maxBodyBytes)
@@ -177,6 +188,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   }
   assertBoolean('fetch.revalidate', fetch.revalidate)
   assertBoolean('fetch.allowPrivateNetworks', fetch.allowPrivateNetworks)
+  assertBoolean('fetch.pdf.enabled', fetch.pdf.enabled)
+  assertPositiveInt('fetch.pdf.maxSizeBytes', fetch.pdf.maxSizeBytes)
+  assertPositiveInt('fetch.pdf.maxPages', fetch.pdf.maxPages)
 
   const p = config.platforms ?? {}
   const platforms = {

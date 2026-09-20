@@ -41,5 +41,6 @@ export function buildFetchLimits(
     store,
     revalidate: config.fetch.revalidate,
     allowPrivateNetworks: config.fetch.allowPrivateNetworks,
+    pdf: config.fetch.pdf,
   }
 }

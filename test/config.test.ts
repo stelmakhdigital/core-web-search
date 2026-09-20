@@ -15,6 +15,7 @@ describe('resolveCoreConfig', () => {
     expect(config.fetch.maxBodyBytes).toBe(5 * 1024 * 1024)
     expect(config.fetch.maxOutputChars).toBe(100_000)
     expect(config.fetch.allowPrivateNetworks).toBe(false)
+    expect(config.fetch.pdf).toEqual({ enabled: true, maxSizeBytes: 20 * 1024 * 1024, maxPages: 50 })
     expect(config.store.path).toBe('/tmp/state/web.db')
     expect(config.ssrf.trustEnvProxy).toBe(false)
     expect(config.browser.enabled).toBe(false)
@@ -41,6 +42,13 @@ describe('resolveCoreConfig', () => {
   it('accepts every known engine id', () => {
     const config = resolveCoreConfig({ search: { engines: [...KNOWN_ENGINES] } }, '/tmp')
     expect(config.search.engines).toHaveLength(KNOWN_ENGINES.length)
+  })
+
+  it('accepts custom fetch.pdf values and rejects invalid ones', () => {
+    const config = resolveCoreConfig({ fetch: { pdf: { enabled: false, maxSizeBytes: 1_000_000, maxPages: 3 } } }, '/tmp')
+    expect(config.fetch.pdf).toEqual({ enabled: false, maxSizeBytes: 1_000_000, maxPages: 3 })
+    expect(() => resolveCoreConfig({ fetch: { pdf: { maxPages: 0 } } }, '/tmp')).toThrow(/fetch\.pdf\.maxPages/)
+    expect(() => resolveCoreConfig({ fetch: { pdf: { maxSizeBytes: -1 } } }, '/tmp')).toThrow(/fetch\.pdf\.maxSizeBytes/)
   })
 
   it('rejects invalid resource values', () => {

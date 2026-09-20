@@ -16,7 +16,7 @@ import { htmlToMarkdown } from '../markdown.ts'
 import { normalizeUrl } from '../search/url.ts'
 import type { WebStore } from '../store/index.ts'
 import type { ResolvedCoreConfig } from '../config.ts'
-import type { FetchResult, PlatformSearchResult, SearchRequest, SearchResult, ToolOutput, ToolSpec } from '../types.ts'
+import type { FetchResult, LlmClient, PlatformSearchResult, SearchRequest, SearchResult, ToolOutput, ToolSpec } from '../types.ts'
 
 /** The stack surface the tools need (implemented by {@link WebStack}). */
 export interface ToolHost {
@@ -28,6 +28,8 @@ export interface ToolHost {
   fetch(request: { readonly url: string }, signal?: AbortSignal): Promise<FetchResult>
   /** One platform search. */
   platformSearch(request: { readonly platform: string; readonly query: string; readonly maxResults?: number }, signal?: AbortSignal): Promise<PlatformSearchResult>
+  /** Host LLM client (optional) — powers `web_fetch` question mode (5.1). */
+  readonly llm?: LlmClient
 }
 
 /** The tool execution context (matches `ToolSpec.execute`). */
@@ -195,8 +197,9 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
   return {
     name: 'web_fetch',
     description:
-      'Fetch a URL and return its readable content (HTML is converted to Markdown). ' +
-      'Use after web_search to read a specific page in full.',
+      'Fetch a URL and return its readable content (HTML is converted to Markdown; PDFs are extracted locally). ' +
+      'Use after web_search to read a specific page in full. ' +
+      'With `question`, the host LLM answers the question from the fetched document (PDF/HTML).',
     maxOutputChars: host.config.fetch.maxOutputChars,
     parameters: {
       type: 'object',
@@ -207,6 +210,12 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
           enum: ['readable', 'raw'],
           description: "'readable' (default): readable content as Markdown. 'raw': the decoded body as-is.",
         },
+        question: {
+          type: 'string',
+          description:
+            'Optional: a question about the fetched document (page or PDF). The host LLM answers it ' +
+            'from the fetched content (requires the host LLM client; `question` is ignored in `raw` mode).',
+        },
       },
       required: ['url'],
       additionalProperties: false,
@@ -216,6 +225,7 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
       const url = typeof record['url'] === 'string' ? record['url'] : ''
       if (url.length === 0) throw new CoreError('url is required', 'WEB_BAD_REQUEST')
       const mode = record['mode'] === 'raw' ? 'raw' : 'readable'
+      const question = typeof record['question'] === 'string' && record['question'].trim() !== '' ? record['question'].trim() : undefined
       const result = await host.fetch({ url }, signal)
       const raw = result.body.content
       let content: string
@@ -228,6 +238,9 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
       const truncated = result.truncated || content.length > maxChars
       if (content.length > maxChars) content = `${content.slice(0, maxChars)}\n[...truncated...]`
       const header = `Fetched ${result.url} (HTTP ${result.statusCode}, ${result.body.kind}${result.fromCache ? ', cache' : ''}, ${content.length} chars${truncated ? ', truncated' : ''})`
+      if (question !== undefined && mode !== 'raw') {
+        return answerFromLlm(host, question, content, result, header, signal)
+      }
       return {
         text: `${header}\n${content}`,
         details: {
@@ -239,6 +252,53 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
         },
       }
     }),
+  }
+}
+
+/** Document excerpt budget for the LLM question prompt (chars). */
+const QUESTION_EXCERPT_CHARS = 60_000
+
+/**
+ * Question mode (5.1): answer `question` from the fetched document via the
+ * host LLM client. Fails with `WEB_NOT_AVAILABLE` when the host provides no
+ * `llm` member (fail-closed: a silently ignored `question` would be worse).
+ * The fetched content is excerpted to `QUESTION_EXCERPT_CHARS` (the fetch
+ * cache still holds the full document for a follow-up `web_fetch`).
+ */
+async function answerFromLlm(
+  host: ToolHost,
+  question: string,
+  content: string,
+  result: FetchResult,
+  header: string,
+  signal: AbortSignal,
+): Promise<ToolOutput> {
+  const llm = host.llm
+  if (llm === undefined) {
+    throw new CoreError(
+      'web_fetch question mode requires the host LLM client (HostAdapter.llm), which this host does not provide',
+      'WEB_NOT_AVAILABLE',
+    )
+  }
+  const excerpt = content.length > QUESTION_EXCERPT_CHARS ? content.slice(0, QUESTION_EXCERPT_CHARS) + '\n[...document excerpt ends...]' : content
+  const prompt =
+    'You are answering a question strictly from the document provided below. ' +
+    'If the document does not contain the answer, say so explicitly. Be concise; quote the document when it supports the answer.\n\n' +
+    `Document (${result.url}):\n---\n${excerpt}\n---\n\nQuestion: ${question}`
+  const completion = await llm.complete({ prompt, maxTokens: 1024, signal })
+  const answer = completion.text.trim()
+  const truncated = answer.length > host.config.fetch.maxOutputChars
+  const text = truncated ? `${answer.slice(0, host.config.fetch.maxOutputChars)}\n[...truncated...]` : answer
+  return {
+    text: `${header}\n\nAnswer to "${question}"${completion.model !== undefined ? ` (model: ${completion.model})` : ''}:\n${text}`,
+    details: {
+      url: result.url,
+      statusCode: result.statusCode,
+      kind: result.body.kind,
+      fromCache: result.fromCache ?? false,
+      question,
+      model: completion.model ?? null,
+    },
   }
 }
 

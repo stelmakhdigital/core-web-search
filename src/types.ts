@@ -260,6 +260,18 @@ export interface CoreConfig {
     readonly maxRedirects?: number
     /** Allow private/reserved network targets (SSRF opt-out; trusted envs only). Default false. */
     readonly allowPrivateNetworks?: boolean
+    /**
+     * PDF extraction (roadmap 5.1): `application/pdf` responses are extracted
+     * to markdown locally (unpdf) instead of failing. Default enabled.
+     */
+    readonly pdf?: {
+      /** Enable PDF extraction. Default true. */
+      readonly enabled?: boolean
+      /** Maximum PDF body size (bytes). Default 20 MiB. */
+      readonly maxSizeBytes?: number
+      /** Maximum pages extracted (head-biased). Default 50. */
+      readonly maxPages?: number
+    }
   }
   readonly platforms?: {
     readonly enabled?: boolean
