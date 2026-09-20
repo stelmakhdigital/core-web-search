@@ -55,6 +55,30 @@ export type CoreErrorCode =
   | 'WEB_FETCH_TOO_LARGE'
   /** The content type is not representable (unsupported). */
   | 'WEB_UNSUPPORTED_CONTENT_TYPE'
+
+  /** Browser family: the browser module or its backend is unavailable (playwright missing, no executable). */
+  | 'BROWSER_UNAVAILABLE'
+  /** The browser session is closed (action on a closed session). */
+  | 'BROWSER_NOT_OPEN'
+  /** A session already exists for the key (or the tab cap is reached). */
+  | 'BROWSER_ALREADY_OPEN'
+  /** The navigation URL is invalid (not http(s), unparseable). */
+  | 'BROWSER_INVALID_URL'
+  /** A browser action failed in the backend. */
+  | 'BROWSER_ACTION_FAILED'
+  /** A browser action exceeded its deadline. */
+  | 'BROWSER_TIMEOUT'
+  /** A browser action was aborted by the caller. */
+  | 'BROWSER_ABORTED'
+  /** A sensitive browser action was denied by the approver (or no approver exists — fail-closed). */
+  | 'BROWSER_APPROVAL_DENIED'
+  /** A sensitive browser action requires approval but the host provides none (fail-closed). */
+  | 'BROWSER_APPROVAL_UNAVAILABLE'
+  /** The requested auth profile is not configured. */
+  | 'BROWSER_AUTH_MISSING'
+  /** The SSRF guard blocked a navigation target (literal or post-redirect). */
+  | 'BROWSER_SSRF_BLOCKED'
+
   /** An internal, unclassified failure. */
   | 'WEB_INTERNAL'
 

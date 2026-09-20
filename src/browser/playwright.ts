@@ -1,0 +1,435 @@
+/**
+ * Local Playwright (Chromium) provider for the browser module. Launches a real
+ * browser on the host and drives one page. Interactive elements are tagged with
+ * a `data-aws-ref` attribute at snapshot time so a later click/type can address
+ * them by `ref` without re-deriving a fragile selector.
+ *
+ * `playwright` is an OPTIONAL dependency (ADR-005 §4): it is loaded lazily on
+ * first use, so the core stays loadable without it; a missing playwright then
+ * surfaces as a clear `BROWSER_UNAVAILABLE` error from `open()`.
+ * @module @agents-web-search/core/browser/playwright
+ */
+
+import type { Browser, Frame, Page } from 'playwright'
+import { CoreError } from '../errors.ts'
+import { checkSsrf } from '../fetch/ssrf.ts'
+import type {
+  BrowserElement,
+  BrowserNavigateResult,
+  BrowserOpenOptions,
+  BrowserScreenshot,
+  BrowserScreenshotOptions,
+  BrowserSession,
+  BrowserSnapshot,
+  BrowserSnapshotOptions,
+  BrowserTarget,
+} from './types.ts'
+import { BROWSER_CODES } from './types.ts'
+
+/** Options for the Playwright provider (from the resolved core config). */
+export interface PlaywrightProviderConfig {
+  /** Run the browser headless. Default `true`. */
+  readonly headless?: boolean
+  /** Default per-action timeout in milliseconds. Default `30000`. */
+  readonly timeoutMs?: number
+  /** Auth profiles: name → storage-state file path (Playwright `storageState`). */
+  readonly authProfiles?: Record<string, string>
+  /**
+   * Allow navigation to private/reserved network targets (loopback, LAN,
+   * link-local). Default `false`: the SSRF guard blocks these. Enable only in
+   * a trusted, network-isolated environment.
+   */
+  readonly allowPrivateNetworks?: boolean
+}
+
+/** A minimal browser backend contract (the manager's provider surface). */
+export interface CoreBrowserProvider {
+  readonly id: string
+  /** Cheap local usability check; must not launch a browser. */
+  available(): boolean
+  /** Launch a browser session. */
+  open(options: BrowserOpenOptions, signal?: AbortSignal): Promise<BrowserSession>
+}
+
+/**
+ * Assert a navigation target is public (not a private/reserved network
+ * target). Throws `CoreError` `BROWSER_SSRF_BLOCKED` when the guard blocks the
+ * URL. The check runs on the literal host and after DNS resolution
+ * (against rebinding) — the same guard as the fetch layer.
+ */
+export async function assertPublicNavigation(url: string, allowPrivate: boolean): Promise<void> {
+  const check = await checkSsrf(url, { allowPrivate })
+  if (!check.allowed) {
+    throw new CoreError(
+      `navigation to ${url} blocked by the SSRF guard: ${check.reason ?? 'private/reserved target'}`,
+      BROWSER_CODES.SSRF_BLOCKED,
+    )
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_MAX_TEXT_LENGTH = 20_000
+const DEFAULT_MAX_ELEMENTS = 200
+
+/** The playwright package, loaded lazily (see {@link loadPlaywright}). */
+type PlaywrightModule = typeof import('playwright')
+
+let playwrightModule: PlaywrightModule | undefined
+let playwrightLoad: Promise<PlaywrightModule> | undefined
+let playwrightLoadFailed = false
+
+/**
+ * Load playwright on first use (the promise is cached, success or failure).
+ * Lazy loading keeps the core tree loadable whenever playwright is not
+ * resolvable; a missing playwright surfaces as `BROWSER_UNAVAILABLE` from
+ * {@link PlaywrightProvider.open} instead of a load-time crash.
+ */
+export function loadPlaywright(): Promise<PlaywrightModule> {
+  playwrightLoad ??= import('playwright').then(
+    (mod) => {
+      playwrightModule = mod
+      return mod
+    },
+    (error: unknown) => {
+      playwrightLoadFailed = true
+      throw error
+    },
+  )
+  return playwrightLoad
+}
+
+/** CSS selector matching the interactive elements surfaced in a snapshot. */
+const INTERACTIVE_SELECTOR =
+  'a[href], button, input, select, textarea, [role="button"], [role="link"]' +
+  '[role="textbox"], [role="checkbox"], [role="radio"], [role="combobox"], [role="switch"]'
+
+/** Raw element shape returned by the frame-side collector. */
+interface RawSnapshotElement {
+  role: string
+  name: string
+  tag: string
+  href: string | null
+}
+
+/**
+ * Frame-side interactive-element collector. Passed to `frame.evaluate`:
+ * Playwright serializes this function via `toString()` and runs it in the
+ * frame's document context, so it must stay self-contained (no references to
+ * module-scope values — only types, which are erased at compile time).
+ *
+ * TRANSPILE-SAFETY: host runtimes may transpile this source with esbuild
+ * `keepNames`, which injects module-scope `__name(...)` helper calls into the
+ * bodies of NAMED function declarations and named const-assigned function
+ * expressions. Those helpers do not exist in the page context and would throw
+ * `ReferenceError: __name is not defined`. Object method shorthand is immune
+ * (the method name comes from the property key), so the helpers live in an
+ * object literal. Do not reintroduce inner `function` declarations or
+ * `const fn = (...) =>` bindings here.
+ *
+ * `start` is the running element count from earlier frames so `data-aws-ref`
+ * numbering stays contiguous across the whole page.
+ */
+function collectFrameElements(params: { selector: string; start: number }): { elements: RawSnapshotElement[]; text: string } {
+  const helpers = {
+    /** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
+    roleFromTag(tag: string, el: Element): string {
+      if (tag === 'a') return 'link'
+      if (tag === 'button') return 'button'
+      if (tag === 'textarea') return 'textbox'
+      if (tag === 'select') return 'combobox'
+      if (tag === 'input') {
+        const type = (el.getAttribute('type') ?? 'text').toLowerCase()
+        if (type === 'checkbox') return 'checkbox'
+        if (type === 'radio') return 'radio'
+        if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
+        return 'textbox'
+      }
+      return tag
+    },
+    /** Best-effort accessible name for an element. */
+    accessibleName(el: Element, tag: string): string {
+      const ariaLabel = el.getAttribute('aria-label')
+      if (ariaLabel !== null && ariaLabel !== '') return ariaLabel.trim()
+      if (tag === 'input') {
+        const placeholder = el.getAttribute('placeholder')
+        if (placeholder !== null && placeholder !== '') return placeholder.trim()
+        const name = el.getAttribute('name')
+        if (name !== null && name !== '') return name.trim()
+      }
+      // `textContent` is typed non-null by the DOM lib but is null for void/empty
+      // elements (e.g. an `<input>` with no placeholder or name); widen to handle it.
+      const rawText = (el as { textContent: string | null }).textContent
+      const text = (rawText ?? '').trim().replace(/\s+/g, ' ')
+      if (text !== '') return text.length > 120 ? `${text.slice(0, 117)}...` : text
+      const id = el.getAttribute('id')
+      return id !== null && id !== '' ? id : '(unnamed)'
+    },
+  }
+  const elements: RawSnapshotElement[] = []
+  const nodes = Array.from(document.querySelectorAll(params.selector))
+  let index = 0
+  for (const el of nodes) {
+    if (el.getClientRects().length === 0) continue
+    const ref = `@e${params.start + index + 1}`
+    index += 1
+    el.setAttribute('data-aws-ref', ref)
+    const tag = el.tagName.toLowerCase()
+    const role = el.getAttribute('role') ?? helpers.roleFromTag(tag, el)
+    const name = helpers.accessibleName(el, tag)
+    const href = tag === 'a' ? el.getAttribute('href') : null
+    elements.push({ role, name, tag, href })
+  }
+  const text = document.body.innerText
+  return { elements, text }
+}
+
+/**
+ * The Playwright-backed browser provider.
+ */
+export class PlaywrightProvider implements CoreBrowserProvider {
+  readonly id = 'playwright'
+  private readonly headless: boolean
+  private readonly timeoutMs: number
+  private readonly authProfiles: Record<string, string>
+  private readonly maxTextLength: number
+  private readonly maxElements: number
+  private readonly allowPrivateNetworks: boolean
+
+  constructor(config: PlaywrightProviderConfig = {}) {
+    this.headless = config.headless ?? true
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.authProfiles = config.authProfiles ?? {}
+    this.maxTextLength = DEFAULT_MAX_TEXT_LENGTH
+    this.maxElements = DEFAULT_MAX_ELEMENTS
+    this.allowPrivateNetworks = config.allowPrivateNetworks ?? false
+    // Preload so available() is accurate by the first browser action.
+    void loadPlaywright().catch(() => undefined)
+  }
+
+  /** Cheap local usability check: the Chromium executable must resolve. */
+  available(): boolean {
+    if (playwrightModule !== undefined) {
+      try {
+        return playwrightModule.chromium.executablePath() !== ''
+      } catch {
+        return false
+      }
+    }
+    // Still loading (optimistic — open() reports the real error) or the load
+    // already failed (unavailable).
+    return !playwrightLoadFailed
+  }
+
+  async open(options: BrowserOpenOptions, signal?: AbortSignal): Promise<BrowserSession> {
+    throwIfAborted(signal)
+    let pw: PlaywrightModule
+    try {
+      pw = await loadPlaywright()
+    } catch (error) {
+      throw new CoreError(
+        'playwright is not installed: it is an optional dependency of @agents-web-search/core — install it (npm install playwright) where the core is consumed, then re-run `npx playwright install chromium`',
+        BROWSER_CODES.UNAVAILABLE,
+        { cause: error },
+      )
+    }
+    const storageState = this.resolveStorageState(options.authProfile)
+    const browser = await pw.chromium.launch({ headless: options.headless ?? this.headless })
+    const contextOptions: { storageState?: string } = {}
+    if (storageState !== undefined) contextOptions.storageState = storageState
+    const context = await browser.newContext(contextOptions)
+    const page = await context.newPage()
+    return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements, this.allowPrivateNetworks)
+  }
+
+  private resolveStorageState(profileName: string | undefined): string | undefined {
+    if (profileName === undefined) return undefined
+    const path = this.authProfiles[profileName]
+    if (path === undefined) {
+      throw new CoreError(
+        `auth profile "${profileName}" is not configured; known profiles: ${Object.keys(this.authProfiles).join(', ') || '(none)'}`,
+        BROWSER_CODES.AUTH_MISSING,
+      )
+    }
+    return path
+  }
+}
+
+/**
+ * A live Playwright-backed session (one page).
+ */
+class PlaywrightSession implements BrowserSession {
+  readonly providerId = 'playwright'
+  private closed = false
+  /** Frame owning each `data-aws-ref` from the last snapshot (main frame when absent). */
+  private readonly frameRefs = new Map<string, Frame>()
+
+  constructor(
+    private readonly browser: Browser,
+    private readonly page: Page,
+    private readonly timeoutMs: number,
+    private readonly maxTextLength: number,
+    private readonly maxElements: number,
+    private readonly allowPrivateNetworks: boolean,
+  ) {}
+
+  url(): string {
+    return this.page.url()
+  }
+
+  async navigate(url: string, signal?: AbortSignal): Promise<BrowserNavigateResult> {
+    this.ensureOpen(signal)
+    const target = assertHttpUrl(url)
+    // SSRF guard on the literal target (before any browser work).
+    await assertPublicNavigation(target, this.allowPrivateNetworks)
+    try {
+      await this.page.goto(target, { waitUntil: 'load', timeout: this.timeoutMs })
+    } catch (error) {
+      throw classifyPlaywrightError(error, 'navigate')
+    }
+    // Playwright follows redirects internally, so re-check the FINAL url: a
+    // public URL that 302s to a private target is reported as blocked.
+    const finalUrl = this.page.url()
+    if (finalUrl.length > 0 && finalUrl !== 'about:blank') {
+      await assertPublicNavigation(finalUrl, this.allowPrivateNetworks)
+    }
+    const title = await this.page.title().catch(() => undefined)
+    return { url: finalUrl, ...(title !== undefined ? { title } : {}) }
+  }
+
+  async snapshot(options: BrowserSnapshotOptions = {}, signal?: AbortSignal): Promise<BrowserSnapshot> {
+    this.ensureOpen(signal)
+    const maxTextLength = options.maxTextLength ?? this.maxTextLength
+    const maxElements = options.maxElements ?? this.maxElements
+    // Collect interactive elements from the main frame and every child frame
+    // (e.g. reCAPTCHA iframes). `collectFrameElements` runs in each frame's
+    // document context; refs are numbered contiguously across frames so a
+    // click/type can be routed to the right frame via `frameRefs`.
+    const frames = this.page.frames()
+    const raw: { el: RawSnapshotElement; frame: Frame }[] = []
+    let mainText = ''
+    for (const frame of frames) {
+      try {
+        const data = await frame.evaluate(collectFrameElements, { selector: INTERACTIVE_SELECTOR, start: raw.length })
+        if (frame === this.page.mainFrame()) mainText = data.text
+        for (const el of data.elements) raw.push({ el, frame })
+      } catch {
+        continue // Frame detached or inaccessible mid-snapshot.
+      }
+    }
+    const elements: BrowserElement[] = raw.slice(0, maxElements).map(({ el, frame }, i) => {
+      const ref = `@e${i + 1}`
+      this.frameRefs.set(ref, frame)
+      return {
+        ref,
+        role: el.role,
+        name: el.name,
+        tag: el.tag,
+        ...(el.href !== null && el.href !== '' ? { href: el.href } : {}),
+        ...(frame === this.page.mainFrame() ? {} : { frame: frame.url() }),
+      }
+    })
+    const truncated = raw.length > maxElements || mainText.length > maxTextLength
+    return {
+      url: this.page.url(),
+      title: await this.page.title().catch(() => ''),
+      elements,
+      text: mainText.slice(0, maxTextLength),
+      truncated,
+    }
+  }
+
+  async click(target: BrowserTarget, signal?: AbortSignal): Promise<void> {
+    this.ensureOpen(signal)
+    const locator = this.locatorFor(target)
+    try {
+      await locator.click({ timeout: this.timeoutMs })
+    } catch (error) {
+      throw classifyPlaywrightError(error, 'click')
+    }
+  }
+
+  async type(target: BrowserTarget, text: string, signal?: AbortSignal): Promise<void> {
+    this.ensureOpen(signal)
+    const locator = this.locatorFor(target)
+    try {
+      await locator.fill(text, { timeout: this.timeoutMs })
+    } catch (error) {
+      throw classifyPlaywrightError(error, 'type')
+    }
+  }
+
+  async evaluate(expression: string, signal?: AbortSignal): Promise<unknown> {
+    this.ensureOpen(signal)
+    try {
+      return await this.page.evaluate(expression)
+    } catch (error) {
+      throw classifyPlaywrightError(error, 'evaluate')
+    }
+  }
+
+  async screenshot(options: BrowserScreenshotOptions = {}, signal?: AbortSignal): Promise<BrowserScreenshot> {
+    this.ensureOpen(signal)
+    try {
+      const buffer = options.selector !== undefined
+        ? await this.page.locator(options.selector).screenshot({ timeout: this.timeoutMs })
+        : await this.page.screenshot({ fullPage: options.fullPage ?? false, timeout: this.timeoutMs })
+      return { buffer, mimeType: 'image/png' }
+    } catch (error) {
+      throw classifyPlaywrightError(error, 'screenshot')
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
+    await this.browser.close().catch(() => undefined)
+  }
+
+  private locatorFor(target: BrowserTarget) {
+    if (target.kind === 'ref') {
+      // Refs are scoped to the frame that produced them (last snapshot); route
+      // into that frame so child-frame elements (e.g. reCAPTCHA iframes) resolve.
+      const frame = this.frameRefs.get(target.ref)
+      return (frame ?? this.page).locator(`[data-aws-ref="${target.ref}"]`)
+    }
+    return this.page.locator(target.selector)
+  }
+
+  private ensureOpen(signal?: AbortSignal): void {
+    if (this.closed) throw new CoreError('the browser session is closed; open a new one', BROWSER_CODES.NOT_OPEN)
+    throwIfAborted(signal)
+  }
+}
+
+/** Validate a navigation URL is http(s). */
+function assertHttpUrl(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new CoreError(`invalid URL: ${url}`, BROWSER_CODES.INVALID_URL)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new CoreError(`only http(s) URLs are supported, got "${parsed.protocol}"`, BROWSER_CODES.INVALID_URL)
+  }
+  return parsed.toString()
+}
+
+/** Throw a `BROWSER_ABORTED` error when the caller signal already aborted. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal !== undefined && signal.aborted) {
+    throw new CoreError('the browser action was aborted', BROWSER_CODES.ABORTED)
+  }
+}
+
+/** Classify a Playwright failure into a `CoreError`. */
+function classifyPlaywrightError(error: unknown, action: string): CoreError {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/timeout/i.test(message)) {
+    return new CoreError(`browser ${action} timed out: ${message}`, BROWSER_CODES.TIMEOUT, { cause: error })
+  }
+  if (/target closed|browser has been closed|context closed/i.test(message)) {
+    return new CoreError(`browser ${action} failed (session closed): ${message}`, BROWSER_CODES.NOT_OPEN, { cause: error })
+  }
+  return new CoreError(`browser ${action} failed: ${message}`, BROWSER_CODES.ACTION_FAILED, { cause: error })
+}

@@ -68,11 +68,13 @@ export interface ResolvedCoreConfig {
   }
   readonly browser: {
     readonly enabled: boolean
+    readonly headless: boolean
     readonly approval: 'never' | 'navigate' | 'all'
     readonly allowPrivateNetworks: boolean
     readonly maxConcurrentTabs: number
     readonly screenshotInlineDefault: boolean
     readonly timeoutMs: number
+    readonly authProfiles: Record<string, string>
   }
   readonly providers: NonNullable<CoreConfig['providers']>
   readonly extended: {
@@ -210,11 +212,13 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   const b = config.browser ?? {}
   const browser = {
     enabled: b.enabled ?? false,
+    headless: b.headless ?? true,
     approval: b.approval ?? 'navigate',
     allowPrivateNetworks: b.allowPrivateNetworks ?? false,
     maxConcurrentTabs: b.maxConcurrentTabs ?? 1,
     screenshotInlineDefault: b.screenshotInlineDefault ?? false,
     timeoutMs: b.timeoutMs ?? 30_000,
+    authProfiles: b.authProfiles ?? {},
   }
   assertPositiveInt('browser.maxConcurrentTabs', browser.maxConcurrentTabs)
   assertPositiveInt('browser.timeoutMs', browser.timeoutMs)

@@ -22,6 +22,8 @@ import { validatePlatform } from './platforms/rulepacks.ts'
 import { searchPlatform } from './platforms/search.ts'
 import { WebStore } from './store/index.ts'
 import { buildCoreTools, type ToolHost } from './tools/index.ts'
+import { createBrowserManager, type BrowserManager } from './browser/manager.ts'
+import { buildBrowserTools } from './browser/tools.ts'
 import type {
   CoreConfig,
   FetchRequest,
@@ -64,9 +66,14 @@ export interface WebStack {
   fetch(request: FetchRequest, signal?: AbortSignal): Promise<FetchResult>
   /** Run one platform search. */
   platformSearch(request: PlatformSearchRequest, signal?: AbortSignal): Promise<PlatformSearchResult>
+  /**
+   * The browser module manager (undefined when `browser.enabled` is false,
+   * the default — ADR-005 §4, Q8).
+   */
+  readonly browser?: BrowserManager
   /** Build the model-facing tool specs (host registration contract). */
   tools(): ToolSpec[]
-  /** Release host resources (store close, host.dispose()). */
+  /** Release host resources (browser sessions, store close, host.dispose()). */
   dispose(): Promise<void>
 }
 
@@ -131,6 +138,18 @@ export function createWebStack(host: HostAdapter): WebStack {
     }),
     rulePackPaths: config.platforms.rulePackPaths,
   })
+
+  // Browser module (ADR-005 §4, Q8): opt-in; the Playwright provider is loaded
+  // lazily, so enabling it here costs nothing until the first browser_open.
+  const browserManager = config.browser.enabled
+    ? createBrowserManager({
+        headless: config.browser.headless,
+        timeoutMs: config.browser.timeoutMs,
+        authProfiles: config.browser.authProfiles,
+        allowPrivateNetworks: config.browser.allowPrivateNetworks,
+        maxConcurrentTabs: config.browser.maxConcurrentTabs,
+      })
+    : undefined
 
   const stackToolHost: ToolHost = {
     config,
@@ -225,6 +244,7 @@ export function createWebStack(host: HostAdapter): WebStack {
     store,
     userAgent,
     engines,
+    browser: browserManager,
     search: searchStack,
     fetch: (request: FetchRequest, signal?: AbortSignal): Promise<FetchResult> => {
       const url = request.url?.trim()
@@ -235,11 +255,14 @@ export function createWebStack(host: HostAdapter): WebStack {
     },
     platformSearch: platformSearchStack,
     tools(): ToolSpec[] {
-      return buildCoreTools(stackToolHost)
+      const core = buildCoreTools(stackToolHost)
+      if (browserManager === undefined) return core
+      return [...core, ...buildBrowserTools({ manager: browserManager, host, config })]
     },
     async dispose(): Promise<void> {
       if (disposed) return
       disposed = true
+      await browserManager?.closeAll()
       await host.dispose?.()
       await store.close()
     },

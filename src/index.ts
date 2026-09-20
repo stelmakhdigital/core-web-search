@@ -93,6 +93,34 @@ export {
   type ToolHost,
 } from './tools/index.ts'
 
+// Browser module (ADR-005 §4, Q8; opt-in via config.browser.enabled)
+export {
+  BROWSER_CODES,
+  PlaywrightProvider,
+  assertPublicNavigation,
+  createBrowserManager,
+  buildBrowserTools,
+  writeScreenshot,
+  ANON_KEY,
+  loadPlaywright,
+  type BrowserManager,
+  type BrowserManagerOptions,
+  type BrowserSession,
+  type BrowserSnapshot,
+  type BrowserSnapshotOptions,
+  type BrowserElement,
+  type BrowserNavigateResult,
+  type BrowserOpenOptions,
+  type BrowserScreenshot,
+  type BrowserScreenshotOptions,
+  type BrowserTarget,
+  type BrowserCode,
+  type CoreBrowserProvider,
+  type PlaywrightProviderConfig,
+  type BrowserToolDeps,
+} from './browser/index.ts'
+
+
 // Utilities
 export { htmlToMarkdown } from './markdown.ts'
 export { normalizeUrl } from './search/url.ts'

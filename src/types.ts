@@ -128,7 +128,7 @@ export interface ToolOutput {
 
 /** A sensitive-operation confirmation request (ADR-005 §3). */
 export interface ApprovalRequest {
-  readonly kind: 'browser_navigate' | 'browser_click' | 'browser_type' | 'curator_remote' | (string & {})
+  readonly kind: 'browser_navigate' | 'browser_evaluate' | 'browser_click' | 'browser_type' | 'curator_remote' | (string & {})
   /** Human-readable description (URL/action; never secrets). */
   readonly description: string
 }
@@ -291,14 +291,18 @@ export interface CoreConfig {
   readonly browser?: {
     /** Enable the Playwright browser module. Default false (Q8). */
     readonly enabled?: boolean
+    /** Run the browser headless (no visible window). Default true. */
+    readonly headless?: boolean
     /** Approval policy: 'never' | 'navigate' | 'all'. Default 'navigate'. */
     readonly approval?: 'never' | 'navigate' | 'all'
     readonly allowPrivateNetworks?: boolean
-    /** Concurrent tabs (one per session is the ported default). Default 1. */
+    /** Concurrent browser sessions (tabs). Default 1. */
     readonly maxConcurrentTabs?: number
     /** Default screenshot mode: file (false) or inline base64 (true). */
     readonly screenshotInlineDefault?: boolean
     readonly timeoutMs?: number
+    /** Auth profiles: name → Playwright storage-state file path. */
+    readonly authProfiles?: Record<string, string>
   }
   /** Provider settings for API and provider-native engines (ADR-004). */
   readonly providers?: {

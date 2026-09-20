@@ -60,6 +60,11 @@ describe('createWebStack', () => {
     ])
   })
 
+  it('keeps the browser module off by default (Q8)', () => {
+    expect(stack?.browser).toBeUndefined()
+    expect(stack!.tools().some((tool) => tool.name.startsWith('browser_'))).toBe(false)
+  })
+
   it('exposes the full engine map', () => {
     expect(stack!.engines.size).toBe(14)
     expect(stack!.engines.get('ddg')?.id).toBe('ddg')
@@ -88,5 +93,54 @@ describe('createWebStack', () => {
     await stack!.dispose()
     await stack!.dispose()
     expect(disposed).toBe(1)
+  })
+})
+
+describe('createWebStack with the browser module (browser.enabled)', () => {
+  let browserStack: WebStack | undefined
+  let browserStateDir: string
+
+  beforeEach(() => {
+    browserStateDir = join(tmpRoot, `browser-state-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    mkdirSync(browserStateDir, { recursive: true })
+    const browserHost: HostAdapter = {
+      identity: { name: 'test-host', version: '1.2.3' },
+      config: { browser: { enabled: true, approval: 'never' } },
+      paths: { stateDir: browserStateDir },
+      credential: async () => undefined,
+      registerTools: (specs) => {
+        return () => {
+          void specs
+        }
+      },
+      toHostError: (error) => error,
+    }
+    browserStack = createWebStack(browserHost)
+  })
+
+  afterEach(async () => {
+    if (browserStack !== undefined) await browserStack.dispose()
+    browserStack = undefined
+    rmSync(browserStateDir, { recursive: true, force: true })
+  })
+
+  it('exposes stack.browser (playwright backend) and 14 tools', () => {
+    expect(browserStack?.browser).toBeDefined()
+    expect(browserStack!.browser!.providerId).toBe('playwright')
+    const names = browserStack!.tools().map((tool) => tool.name)
+    expect(names).toHaveLength(14)
+    expect(names).toContain('browser_open')
+    expect(names).toContain('browser_close')
+    expect(names.slice(0, 6)).toEqual([
+      'web_search', 'web_fetch', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear',
+    ])
+  })
+
+  it('resolves the browser config (headless default true, approval default navigate)', () => {
+    expect(browserStack!.config.browser.enabled).toBe(true)
+    expect(browserStack!.config.browser.headless).toBe(true)
+    expect(browserStack!.config.browser.approval).toBe('never')
+    expect(browserStack!.config.browser.maxConcurrentTabs).toBe(1)
+    expect(browserStack!.config.browser.screenshotInlineDefault).toBe(false)
   })
 })
