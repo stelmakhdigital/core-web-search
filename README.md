@@ -137,6 +137,122 @@ Security-ревью 2026-09-21 (roadmap 6.3) — состояние:
 - **Логи/вывод**: ядро не пишет в stdout/stderr и не сохраняет тела
   запросов/ответов; локальный SQLite-store (`web.db`) — в host state dir.
 
+## Установка в агентов
+
+### DSH (DeepSeek Harness)
+
+Адаптер — [`@agents-web-search/dsh`](https://github.com/stelmakhdigital/agents-web-search/tree/master/packages/dsh)
+(cordis-плагин):
+
+```sh
+# в DSH-профиле (профиль = каталог с package.json + pnpm-workspace.yaml):
+dsh plugin --profile <профиль> add npm:@agents-web-search/dsh
+# dev-режим (до публикации core, фаза 7.3): file: на каталог адаптера
+dsh plugin --profile <профиль> add file:../agents-web-search/packages/dsh
+dsh --profile <профиль> --dump-config   # проверка: web seam patched (multi/cached-http)
+```
+
+Плагин регистрирует провайдеры в seam `web` (id `multi`/`cached-http`) +
+адаптерские инструменты (`get_search_content`, `web_platform_search`,
+`web_history`, `web_search_stats`, `web_cache_clear`, `browser_*`).
+`web_search`/`web_fetch` принадлежат хостовому `tool-web` — пин
+`searchProvider: multi`/`fetchProvider: cached-http` включает их на ядре.
+Built-in web-пакеты DSH (id `http`/`deepseek`/…) сосуществуют безопасно:
+пин снимает `WEB_PROVIDER_AMBIGUOUS`; `WEB_DUPLICATE_PROVIDER` возможен
+только при двойной загрузке плагина (6.4).
+
+### Pi (earendil-works)
+
+Адаптер — [`@agents-web-search/pi`](https://github.com/stelmakhdigital/agents-web-search/tree/master/packages/pi)
+(Pi package с extension):
+
+```sh
+pi install npm:@agents-web-search/pi      # user scope (~/.pi/agent/npm/)
+pi install -l npm:@agents-web-search/pi   # project scope (.pi/npm/)
+pi list                                   # проверка
+```
+
+Extension регистрирует все инструменты ядра (включая `web_search`/
+`web_fetch`), конфиг — `~/.pi/agent/web-search.json` (опционально),
+state — `~/.pi/agent/web-search/`. Конфликт имён инструментов с другим
+extension → fail-fast при старте Pi (6.4).
+
+## Как написать свой адаптер (HostAdapter)
+
+Ядро агностично (Q9): любой агент подключается через единственный контракт
+`HostAdapter` (`createWebStack(host)`). Поля:
+
+| Поле | Роль |
+|---|---|
+| `identity: {name, version?}` | метаданные хоста (история/статистика) |
+| `config: CoreConfig` | конфиг ядра (частичный допустим — есть дефолты) |
+| `paths: {stateDir, tempDir?}` | где лежат `web.db` и временные файлы |
+| `credential(name) → string?` | секреты (например, `websearch:<engine>` для API-ключей) |
+| `registerTools(specs) → disposer` | регистрация `ToolSpec` в механизме хоста; **ядро само registerTools не вызывает — адаптер делает это** |
+| `toHostError(error) → unknown` | перевод `CoreError` в формат ошибок хоста |
+| `approve?(request) → boolean?` | подтверждения (browser); absent → fail-closed |
+| `llm?(client)` | LLM-клиент (`complete({prompt, model?, maxTokens?, signal?})`): question-режим `web_fetch`, curator-саммари; absent → эти функции fail-closed |
+| `log?`, `dispose?` | опциональные хуки |
+
+`ToolSpec` = `{name, description, parameters (JSON Schema), maxOutputChars?,
+execute(args, {signal, onUpdate?}) → Promise<{text, isError?}>}`. Ошибки
+инструментов возвращаются как `{text: 'Error (<CODE>): <message>',
+isError: true}`.
+
+Правила адаптера (ADR-002): тонкий слой — только маппинг типов/конфигов/
+путей/ошибок; вся логика (движки, кэш, SSRF, store, tools) — в ядре. Общий
+контракт тестов для новых адаптеров — `runHostContractTests` (пакет
+`packages/contract` в agents-web-search, 12 проверок).
+
+## Конфигурация: референс
+
+Полный тип — `CoreConfig` (`src/types.ts`); все поля валидируются
+(`resolveCoreConfig` → `WEB_BAD_REQUEST` при нарушении). Дефолты «из коробки»
+(пустой конфиг = безключевой ddg+bing):
+
+| Блок | Ключевые поля (дефолт) |
+|---|---|
+| `search` | `engines` (ddg, bing), `mode` (fallback), `region`, `freshness`, `rateLimitPerSec` (1), `timeoutMs` (30 s), `cacheTtlMs` (15 min), `maxSerpBytes` (2 MB), `enrich` (6/5/10 s), `embed` (off) |
+| `fetch` | `cacheTtlMs` (24 h), `revalidate` (true), `maxBodyBytes` (5 MB), `maxOutputChars` (100 k), `timeoutMs` (30 s), `maxRedirects` (5), `allowPrivateNetworks` (false) |
+| `fetch.pdf` | `enabled` (true), `maxSizeBytes` (20 MB), `maxPages` (50) |
+| `fetch.video` | `enabled` (true) — YouTube: oEmbed + description + таймcoded-транскрипт |
+| `fetch.github` | `enabled` (true), `maxCloneBytes` (200 MB), `maxTreeEntries` (500) |
+| `platforms` | `enabled` (true), `maxResults` (20), `timeoutMs` (30 s), `maxBytes` (5 MB), `platforms[]` (custom), `rulePackPaths[]` |
+| `store` | `path` (`<stateDir>/web.db`), `evictLimits` (1000/500) |
+| `ssrf` | `trustEnvProxy` (false) |
+| `browser` | `enabled` (false), `headless` (true), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
+| `providers.<engine>` | `apiKey`, `baseUrl` (для provider-native), `model` — см. таблицу движков |
+| `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, отложен) |
+| `extended.contentCache` | 128/128 MiB/1 h — **no-op в v0.1** (резерв, см. «Лимиты») |
+
+## Privacy-модель
+
+- **Локально**: вся история/кэш — SQLite `web.db` в state dir хоста
+  (`$DSH_HOME/web.db`, `~/.pi/agent/web-search/` у Pi). Телеметрии нет.
+- **Ключевые движки** (ddg/bing/searxng/ollama): запросы идут на публичные
+  SERP/инстанс пользователя; ключи не используются.
+- **API/provider-native движки**: ключ (если задан) отправляется только
+  провайдеру на `baseUrl`; в сообщениях об ошибках, логах и выводах ключ
+  никогда не появляется (6.3).
+- **LLM**: вызывается только через `HostAdapter.llm` (клиент хоста); ядро
+  не знает ни одного LLM-эндпоинта само.
+- **Curator UI**: только loopback, 128-бит токен, plain HTTP (TLS отложен) —
+  не публикуйте токен-URL наружу.
+- **Браузер**: headless по умолчанию; приватные сети — только явным
+  `browser.allowPrivateNetworks`; действия — по `approval` (fail-closed).
+
+## Browser-модуль
+
+Опциональный модуль ядра (Q8): Playwright — optional dependency (ставится
+только при `browser.enabled: true`). Инструменты: `browser_open`,
+`browser_navigate`, `browser_screenshot` (PNG в state dir, опционально
+inline), `browser_click`/`browser_type`/`browser_evaluate` (по
+`approval`), `browser_close`. Настройки — блок `browser` (см. референс).
+SSRF-проверка на open/navigate; таймаут на `page.goto` и операции;
+одна вкладка по умолчанию (`maxConcurrentTabs`). Ограничения v0.1:
+auth-профили — базовые (`browser.authProfiles`), мульти-вкладки и
+персистентные профили — в план v1.1.
+
 ## Лицензия
 
 MIT. Значительная часть кода перенесена из проекта `dsh-web-automation` (MIT).
