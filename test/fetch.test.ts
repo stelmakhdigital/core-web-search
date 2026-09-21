@@ -388,3 +388,91 @@ describe('CachedHttpFetchProvider — YouTube video enrichment (5.2)', () => {
     await store.close()
   })
 })
+
+  it('truncates a response body at maxResponseBytes', async () => {
+    const store = makeStore()
+    const payload = 'a'.repeat(10_000)
+    fetchMock.mockResolvedValue(fakeResponse({ status: 200, bytes: new TextEncoder().encode(payload), headers: { 'content-type': 'text/plain' } }))
+    const provider = makeProvider(store, { maxResponseBytes: 1_000 })
+    const result = await provider.fetch({ url: 'https://example.com/big' })
+    expect(result.truncated).toBe(true)
+    expect(result.body.content).toHaveLength(1_000)
+    await store.close()
+  })
+
+describe('CachedHttpFetchProvider — redirects + revalidate fallback (5.6)', () => {
+  it('follows a same-origin redirect to the final document', async () => {
+    const store = makeStore()
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/start')) {
+        return fakeResponse({ status: 302, headers: { location: '/final' } })
+      }
+      return fakeResponse({ status: 200, body: '<html>final</html>', headers: { 'content-type': 'text/html' } })
+    })
+    const provider = makeProvider(store)
+    const result = await provider.fetch({ url: 'https://example.com/start' })
+    expect(result.statusCode).toBe(200)
+    expect(result.url).toBe('https://example.com/final')
+    expect(result.body.content).toBe('<html>final</html>')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await store.close()
+  })
+
+  it('blocks a redirect chain longer than maxRedirects with WEB_REDIRECT_BLOCKED', async () => {
+    const store = makeStore()
+    fetchMock.mockImplementation(async (url: string) => fakeResponse({ status: 302, headers: { location: '/loop' } }))
+    const provider = makeProvider(store, { maxRedirects: 1 })
+    await expect(provider.fetch({ url: 'https://example.com/start' })).rejects.toMatchObject({ code: 'WEB_REDIRECT_BLOCKED' })
+    // The initial hop + one redirect attempt, then the cap.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await store.close()
+  })
+
+  it('rejects a redirect response without a Location header', async () => {
+    const store = makeStore()
+    fetchMock.mockResolvedValue(fakeResponse({ status: 302 }))
+    const provider = makeProvider(store)
+    await expect(provider.fetch({ url: 'https://example.com/start' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_ERROR' })
+    await store.close()
+  })
+
+  it('blocks a cross-origin redirect with WEB_REDIRECT_BLOCKED', async () => {
+    const store = makeStore()
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/start')) {
+        return fakeResponse({ status: 302, headers: { location: 'https://other.example.org/x' } })
+      }
+      return fakeResponse({ status: 200, body: '<html>never</html>' })
+    })
+    const provider = makeProvider(store)
+    await expect(provider.fetch({ url: 'https://example.com/start' })).rejects.toMatchObject({ code: 'WEB_REDIRECT_BLOCKED' })
+    await store.close()
+  })
+
+  it('revalidate: a non-304/2xx response falls back to a full fetch', async () => {
+    const store = makeStore()
+    const key = normalizeUrl('https://example.com')
+    await store.recordPage({
+      url: 'https://example.com/',
+      normalizedUrl: key,
+      fetchedAt: Date.now() - 120_000, // beyond the 60s TTL
+      etag: 'W/"v1"',
+      statusCode: 200,
+      bodyKind: 'html',
+      body: '<html>stale</html>',
+      truncated: false,
+    })
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/moved')) {
+        return fakeResponse({ status: 200, body: '<html>moved</html>', headers: { 'content-type': 'text/html' } })
+      }
+      // The conditional request gets a redirect: revalidation cannot proceed.
+      return fakeResponse({ status: 302, headers: { location: '/moved' } })
+    })
+    const provider = makeProvider(store)
+    const result = await provider.fetch({ url: 'https://example.com' })
+    expect(result.url).toBe('https://example.com/moved')
+    expect(result.body.content).toBe('<html>moved</html>')
+    await store.close()
+  })
+})

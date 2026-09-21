@@ -221,6 +221,44 @@ describe('fetchGitHubDocument + provider integration (5.3)', () => {
     vi.unstubAllGlobals()
   })
 
+  it('serves a /tree/ URL whose path is a file (tree→file fallback)', async () => {
+    const target = parseGitHubUrl(`https://github.com/owner/repo/tree/${branch}/docs/guide.md`)!
+    expect(target).toMatchObject({ kind: 'tree', repoPath: 'docs/guide.md' })
+    const doc = await fetchGitHubDocument(target, limits())
+    expect(doc).toContain('# owner/repo/docs/guide.md (file,')
+    expect(doc).toContain('Guide content here.')
+  })
+
+  it('caps a tree listing at maxTreeEntries (with a note)', async () => {
+    const target = parseGitHubUrl(`https://github.com/owner/repo/tree/${branch}`)!
+    const doc = await fetchGitHubDocument(target, limits({ maxTreeEntries: 2 }))
+    expect(doc).toContain('listing capped at 2 entries')
+    // Only two entries (plus the cap note) are listed.
+    const entryLines = doc.split('\n').filter((line) => line.startsWith('- ')).filter((line) => !line.includes('capped'))
+    expect(entryLines).toHaveLength(2)
+  })
+
+  it('rejects a blob for a missing file with WEB_NOT_AVAILABLE', async () => {
+    const target = parseGitHubUrl(`https://github.com/owner/repo/blob/${branch}/nope/absent.md`)!
+    await expect(fetchGitHubDocument(target, limits())).rejects.toMatchObject({ code: 'WEB_NOT_AVAILABLE' })
+  })
+
+  it('rejects files larger than maxFileBytes with WEB_FETCH_TOO_LARGE', async () => {
+    const target = parseGitHubUrl(`https://github.com/owner/repo/blob/${branch}/src/app.ts`)!
+    await expect(fetchGitHubDocument(target, limits({ maxFileBytes: 10 }))).rejects.toMatchObject({
+      code: 'WEB_FETCH_TOO_LARGE',
+    })
+  })
+
+  it('maps a 403 to WEB_QUOTA and a transport failure to WEB_NETWORK', async () => {
+    const target = parseGitHubUrl('https://github.com/owner/repo/pull/1')!
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('forbidden', { status: 403 })))
+    await expect(fetchGitHubDocument(target, limits())).rejects.toMatchObject({ code: 'WEB_QUOTA' })
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))))
+    await expect(fetchGitHubDocument(target, limits())).rejects.toMatchObject({ code: 'WEB_NETWORK' })
+    vi.unstubAllGlobals()
+  })
+
   it('deletes and rejects clones that exceed maxCloneBytes', async () => {
     const bigDir = path.join(repoDir, 'big')
     await mkdir(bigDir, { recursive: true })

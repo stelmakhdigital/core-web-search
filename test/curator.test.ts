@@ -175,6 +175,137 @@ describe('curator server (5.4)', () => {
   })
 })
 
+describe('curator server edge cases (5.6)', () => {
+  let store: WebStore
+  let handles: Array<{ close: () => Promise<void> }> = []
+
+  afterEach(async () => {
+    for (const handle of handles.splice(0)) await handle.close()
+    await store.close()
+  })
+
+  function fakeLlm(text = 'SUMMARY') {
+    return {
+      complete: vi.fn(async () => ({ text, model: 'fake-model' })),
+    } as LlmClient
+  }
+
+  it('summarize fails with 404 for an unknown id', async () => {
+    store = new WebStore({ path: ':memory:' })
+    const handle = await startCuratorServer({ store, llm: fakeLlm(), port: 0 })
+    handles.push(handle)
+    const base = handle.url.split('/?token=')[0]
+    const res = await fetch(`${base}/api/summarize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${handle.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 999999, kind: 'search' }),
+    })
+    expect(res.status).toBe(404)
+  })
+
+  it('summarizes a page entry (entryText page path, incl. html kind marker)', async () => {
+    store = new WebStore({ path: ':memory:' })
+    const pageId = await store.recordPage({
+      url: 'https://example.com/h',
+      normalizedUrl: 'https://example.com/h',
+      fetchedAt: Date.now(),
+      statusCode: 200,
+      bodyKind: 'html',
+      body: '<html>page</html>',
+      truncated: false,
+    })
+    const llm = fakeLlm('page summary')
+    const handle = await startCuratorServer({ store, llm, port: 0 })
+    handles.push(handle)
+    const base = handle.url.split('/?token=')[0]
+    const res = await fetch(`${base}/api/summarize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${handle.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id: pageId, kind: 'page' }),
+    })
+    expect(res.status).toBe(200)
+    const prompt = (llm.complete as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as { prompt: string }
+    expect(prompt.prompt).toContain('URL: https://example.com/h')
+    expect(prompt.prompt).toContain('[html content]')
+  })
+
+  it('returns 502 when the LLM produces an empty summary', async () => {
+    store = new WebStore({ path: ':memory:' })
+    await store.recordSearch({
+      cacheKey: 'multi:multi:ddg:empty summary',
+      query: 'empty summary',
+      engines: ['ddg'],
+      createdAt: Date.now(),
+      sources: [],
+      truncated: false,
+      content: 'some answer',
+    })
+    const llm = fakeLlm('   ')
+    const handle = await startCuratorServer({ store, llm, port: 0 })
+    handles.push(handle)
+    const base = handle.url.split('/?token=')[0]
+    const res = await fetch(`${base}/api/summarize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${handle.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 1, kind: 'search' }),
+    })
+    expect(res.status).toBe(502)
+    const body = (await res.json()) as { code: string }
+    expect(body.code).toBe('WEB_PROVIDER_ERROR')
+  })
+
+  it('discard removes the cached summary (the next summarize calls the LLM again)', async () => {
+    store = new WebStore({ path: ':memory:' })
+    const searchId = await store.recordSearch({
+      cacheKey: 'multi:multi:ddg:discard summary',
+      query: 'discard summary',
+      engines: ['ddg'],
+      createdAt: Date.now(),
+      sources: [],
+      truncated: false,
+      content: 'answer',
+    })
+    const llm = fakeLlm()
+    const handle = await startCuratorServer({ store, llm, port: 0 })
+    handles.push(handle)
+    const base = handle.url.split('/?token=')[0]
+    const headers = { authorization: `Bearer ${handle.token}`, 'content-type': 'application/json' }
+    await fetch(`${base}/api/summarize`, { method: 'POST', headers, body: JSON.stringify({ id: searchId, kind: 'search' }) })
+    await fetch(`${base}/api/summarize`, { method: 'POST', headers, body: JSON.stringify({ id: searchId, kind: 'search' }) })
+    expect(llm.complete).toHaveBeenCalledTimes(1)
+    await fetch(`${base}/api/discard`, { method: 'POST', headers, body: JSON.stringify({ id: searchId, kind: 'search' }) })
+    // The record is gone: summarizing it again now 404s (no LLM call, no cached summary).
+    const again = await fetch(`${base}/api/summarize`, { method: 'POST', headers, body: JSON.stringify({ id: searchId, kind: 'search' }) })
+    expect(again.status).toBe(404)
+    expect(llm.complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects oversized, null and array request bodies (500 WEB_INTERNAL)', async () => {
+    store = new WebStore({ path: ':memory:' })
+    const handle = await startCuratorServer({ store, port: 0 })
+    handles.push(handle)
+    const base = handle.url.split('/?token=')[0]
+    const headers = { authorization: `Bearer ${handle.token}`, 'content-type': 'application/json' }
+    const big = await fetch(`${base}/api/discard`, { method: 'POST', headers, body: 'x'.repeat(1_000_001) })
+    expect(big.status).toBe(500)
+    const bigBody = (await big.json()) as { code: string }
+    expect(bigBody.code).toBe('WEB_INTERNAL')
+    const nullBody = await fetch(`${base}/api/discard`, { method: 'POST', headers, body: 'null' })
+    expect(nullBody.status).toBe(500)
+    const arrayBody = await fetch(`${base}/api/discard`, { method: 'POST', headers, body: '[1,2]' })
+    expect(arrayBody.status).toBe(500)
+  })
+
+  it('answers unknown endpoints with 404', async () => {
+    store = new WebStore({ path: ':memory:' })
+    const handle = await startCuratorServer({ store, port: 0 })
+    handles.push(handle)
+    const base = handle.url.split('/?token=')[0]
+    const res = await fetch(`${base}/api/unknown`, { headers: { authorization: `Bearer ${handle.token}` } })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('isLoopback (5.4)', () => {
   it('accepts loopback values and rejects the rest', () => {
     expect(isLoopback(undefined)).toBe(true)
