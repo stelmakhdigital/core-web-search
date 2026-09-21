@@ -1,6 +1,6 @@
 {
   "name": "@agents-web-search/core",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Agent-agnostic web-search core: 14 search engines (keyless SERP, API, and provider-native), a SQLite-cached SSRF-guarded fetch, platform search, the web store (history/cache), and model-facing tools. Hosts integrate through the HostAdapter contract (DSH and Pi adapters live in the @agents-web-search workspace).",
   "keywords": [
     "web-search",
@@ -23,6 +23,7 @@
     "lib",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
