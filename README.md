@@ -139,18 +139,31 @@ Security-ревью 2026-09-21 (roadmap 6.3) — состояние:
 
 ## Установка в агентов
 
+Канал дистрибуции — **git** (решение 2026-09-21: пакеты не публикуются в
+npm; имена `@agents-web-search/*` сохранены как идентификаторы пакетов).
+Репозиторий адаптеров самодостаточен: core (pinned `v1.0.0`) лежит в нём
+тарболом (`.vendor/`), а DSH-плагин — предсобраным бандлом
+(`packages/dsh/lib/`) — клон ставится офлайн.
+
 ### DSH (DeepSeek Harness)
 
 Адаптер — [`@agents-web-search/dsh`](https://github.com/stelmakhdigital/agents-web-search/tree/master/packages/dsh)
 (cordis-плагин):
 
 ```sh
+git clone https://github.com/stelmakhdigital/agents-web-search.git
 # в DSH-профиле (профиль = каталог с package.json + pnpm-workspace.yaml):
-dsh plugin --profile <профиль> add npm:@agents-web-search/dsh
-# dev-режим (до публикации core, фаза 7.3): file: на каталог адаптера
-dsh plugin --profile <профиль> add file:../agents-web-search/packages/dsh
+dsh plugin --profile <профиль> add file:/путь/к/agents-web-search/packages/dsh
 dsh --profile <профиль> --dump-config   # проверка: web seam patched (multi/cached-http)
 ```
+
+Обновление: `git -C /путь/к/agents-web-search pull` +
+`dsh plugin --profile <профиль> update`. Однокомандного
+`dsh plugin add git+https://…` нет: `dsh plugin add` — форвардер в
+`pnpm add`, а pnpm резолвит `file:`-зависимости внутри git-пакета
+относительно **проекта-потребителя** (профиля), а не клона (проверено
+на pnpm 11.7) — клон + `file:` надёжнее и проверено E2E (свежий клон →
+`--dump-config`: web seam pinned, без DUPLICATE/AMBIGUOUS).
 
 Плагин регистрирует провайдеры в seam `web` (id `multi`/`cached-http`) +
 адаптерские инструменты (`get_search_content`, `web_platform_search`,
@@ -164,18 +177,31 @@ Built-in web-пакеты DSH (id `http`/`deepseek`/…) сосуществую�
 ### Pi (earendil-works)
 
 Адаптер — [`@agents-web-search/pi`](https://github.com/stelmakhdigital/agents-web-search/tree/master/packages/pi)
-(Pi package с extension):
+(Pi package с extension). Pi ставит git-репозиторий **одной командой**
+(сам клонирует в каталог установки и делает `npm install`):
 
 ```sh
-pi install npm:@agents-web-search/pi      # user scope (~/.pi/agent/npm/)
-pi install -l npm:@agents-web-search/pi   # project scope (.pi/npm/)
-pi list                                   # проверка
+pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.0.1   # user scope
+pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.0.1  # project scope
+pi list                                    # проверка
+# обновление: pi update (для зафиксированного ref — fetch origin <ref>)
 ```
 
 Extension регистрирует все инструменты ядра (включая `web_search`/
 `web_fetch`), конфиг — `~/.pi/agent/web-search.json` (опционально),
 state — `~/.pi/agent/web-search/`. Конфликт имён инструментов с другим
 extension → fail-fast при старте Pi (6.4).
+
+### Прямое использование ядра (в своём коде)
+
+Ядро — обычный пакет (корень репо `core-web-search`), ставится из git
+(репозиторий содержит предсобранное `lib/`):
+
+```sh
+pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+# или npm:
+npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+```
 
 ## Как написать свой адаптер (HostAdapter)
 

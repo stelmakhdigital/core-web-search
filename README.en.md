@@ -66,18 +66,32 @@ summaries via `HostAdapter.llm`, discard).
 
 ## Install into agents
 
+Distribution channel: **git** (decision 2026-09-21: the packages are not
+published to npm; the `@agents-web-search/*` names are kept as package
+identifiers). The adapters repo is self-contained: the pinned core
+(`v1.0.0`) ships inside the repo as a tarball (`.vendor/`) and the DSH
+plugin as a prebuilt bundle (`packages/dsh/lib/`) — a fresh clone
+installs offline.
+
 ### DSH (DeepSeek Harness)
 
 Adapter: [`@agents-web-search/dsh`](https://github.com/stelmakhdigital/agents-web-search/tree/master/packages/dsh)
 (cordis plugin):
 
 ```sh
+git clone https://github.com/stelmakhdigital/agents-web-search.git
 # in a DSH profile (a dir with package.json + pnpm-workspace.yaml):
-dsh plugin --profile <profile> add npm:@agents-web-search/dsh
-# dev mode (before the core is published): a file: link to the adapter dir
-dsh plugin --profile <profile> add file:../agents-web-search/packages/dsh
+dsh plugin --profile <profile> add file:/path/to/agents-web-search/packages/dsh
 dsh --profile <profile> --dump-config   # verify: web seam patched (multi/cached-http)
 ```
+
+Update: `git -C /path/to/agents-web-search pull` +
+`dsh plugin --profile <profile> update`. There is no one-command
+`dsh plugin add git+https://…`: `dsh plugin add` is a forwarder to
+`pnpm add`, and pnpm resolves `file:` dependencies inside a git package
+relative to the **consuming project** (the profile), not the clone
+(verified on pnpm 11.7) — clone + `file:` is the reliable, E2E-verified
+path (fresh clone → `--dump-config`: seam pinned, no DUPLICATE/AMBIGUOUS).
 
 The plugin registers the core's providers into the `web` seam (ids
 `multi`/`cached-http`) plus the adapter tools (`get_search_content`,
@@ -91,18 +105,31 @@ happen when the plugin is loaded twice (6.4).
 ### Pi (earendil-works)
 
 Adapter: [`@agents-web-search/pi`](https://github.com/stelmakhdigital/agents-web-search/tree/master/packages/pi)
-(Pi package with an extension):
+(Pi package with an extension). Pi installs a git repo in **one command**
+(it clones into its install dir and runs `npm install` itself):
 
 ```sh
-pi install npm:@agents-web-search/pi      # user scope (~/.pi/agent/npm/)
-pi install -l npm:@agents-web-search/pi   # project scope (.pi/npm/)
-pi list                                   # verify
+pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.0.1   # user scope
+pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.0.1  # project scope
+pi list                                    # verify
+# update: pi update (for a pinned ref — fetch origin <ref>)
 ```
 
 The extension registers all core tools (including `web_search`/`web_fetch`);
 config — `~/.pi/agent/web-search.json` (optional), state —
 `~/.pi/agent/web-search/`. A tool-name conflict with another extension
 fails fast at Pi startup (6.4).
+
+### Using the core directly (in your own code)
+
+The core is a plain package (repo root `core-web-search`) and can be
+installed straight from git (the repo ships a prebuilt `lib/`):
+
+```sh
+pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+# or with npm:
+npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+```
 
 ## Writing your own adapter (HostAdapter)
 
