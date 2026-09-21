@@ -1,0 +1,27 @@
+# Phase 6.1 CI: typecheck + Q9 no-host-imports lint + tests with coverage
+# thresholds (vitest.config.ts). Node 22, ubuntu-latest.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: typecheck + lint:no-host-imports + test (coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (lockfile)
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck (tsc strict)
+        run: npm run typecheck
+      - name: Lint — no host imports in core (Q9)
+        run: npm run lint:no-host-imports
+      - name: Test + coverage thresholds
+        run: npm run test:coverage
