@@ -181,8 +181,8 @@ Built-in web-пакеты DSH (id `http`/`deepseek`/…) сосуществую�
 (сам клонирует в каталог установки и делает `npm install`):
 
 ```sh
-pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.0.1   # user scope
-pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.0.1  # project scope
+pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.0.2   # user scope
+pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.0.2  # project scope
 pi list                                    # проверка
 # обновление: pi update (для зафиксированного ref — fetch origin <ref>)
 ```
