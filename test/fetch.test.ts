@@ -39,12 +39,13 @@ function makeProvider(store: WebStore, overrides: Record<string, unknown> = {}):
     revalidate: true,
     allowPrivateNetworks: false,
     pdf: { enabled: true, maxSizeBytes: 2_000_000, maxPages: 5 },
+    video: { enabled: true },
     ...overrides,
   })
 }
 
 /** Minimal Response stand-in with a real Headers and a one-chunk body stream. */
-function fakeResponse(opts: { status?: number; body?: string; bytes?: Uint8Array; headers?: Record<string, string> }): Response {
+function fakeResponse(opts: { status?: number; body?: string; bytes?: Uint8Array; jsonValue?: unknown; headers?: Record<string, string> }): Response {
   const status = opts.status ?? 200
   const bytes = opts.bytes !== undefined ? opts.bytes : new TextEncoder().encode(opts.body ?? '')
   const stream = new ReadableStream<Uint8Array>({
@@ -60,6 +61,7 @@ function fakeResponse(opts: { status?: number; body?: string; bytes?: Uint8Array
     headers: new Headers(opts.headers ?? {}),
     body: stream,
     url: '',
+    ...(opts.jsonValue !== undefined ? { json: async () => opts.jsonValue } : {}),
   } as unknown as Response
 }
 
@@ -296,6 +298,92 @@ describe('CachedHttpFetchProvider — PDF extraction (5.1)', () => {
     expect(markdown).toContain('page two')
     expect(markdown).not.toContain('page three')
     expect(markdown).toContain('3 pages; showing the first 2')
+    await store.close()
+  })
+})
+
+describe('CachedHttpFetchProvider — YouTube video enrichment (5.2)', () => {
+  const WATCH = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  const watchHtml =
+    '<html><head><meta name="description" content="The &amp; classic description"></head><body>watch page</body></html>'
+  const oembedJson = { title: 'Test Video', author_name: 'Test Author', thumbnail_url: 'https://i.ytimg.com/x.jpg' }
+  const vtt = 'WEBVTT\n\n00:00:01.280 --> 00:00:04.000\nhello world\n'
+
+  function routeWatch(opts: { oembed?: unknown; oembedStatus?: number; vtt?: string; vttStatus?: number; html?: string } = {}): void {
+    fetchMock.mockImplementation((input: URL | string) => {
+      const u = typeof input === 'string' ? input : input.toString()
+      if (u.startsWith('https://www.youtube.com/oembed')) {
+        return Promise.resolve(
+          fakeResponse({
+            status: opts.oembedStatus ?? 200,
+            jsonValue: opts.oembed ?? oembedJson,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+      }
+      if (u.startsWith('https://www.youtube.com/api/timedtext')) {
+        return Promise.resolve(
+          fakeResponse({
+            status: opts.vttStatus ?? 200,
+            body: opts.vtt ?? vtt,
+            headers: { 'content-type': 'text/vtt' },
+          }),
+        )
+      }
+      return Promise.resolve(
+        fakeResponse({ status: 200, body: opts.html ?? watchHtml, headers: { 'content-type': 'text/html' } }),
+      )
+    })
+  }
+
+  it('enriches a watch URL into a markdown document and caches it', async () => {
+    const store = makeStore()
+    routeWatch()
+    const provider = makeProvider(store)
+    const result = await provider.fetch({ url: WATCH })
+    expect(result.body.kind).toBe('text')
+    const markdown = result.body.content
+    expect(markdown).toContain('# Test Video (video)')
+    expect(markdown).toContain('by Test Author')
+    expect(markdown).toContain('## Description')
+    expect(markdown).toContain('The & classic description')
+    expect(markdown).toContain('[00:01] hello world')
+    const cached = await store.readPage(normalizeUrl(WATCH))
+    expect(cached?.bodyKind).toBe('text')
+    const again = await provider.fetch({ url: WATCH })
+    expect(again.fromCache).toBe(true)
+    expect(again.body.content).toBe(markdown)
+    const calls = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(calls.filter((u) => u.startsWith('https://www.youtube.com/api/timedtext')).length).toBeLessThanOrEqual(1)
+    await store.close()
+  })
+
+  it('degrades to the description when oEmbed and the transcript both fail', async () => {
+    const store = makeStore()
+    routeWatch({ oembedStatus: 404, vtt: '' })
+    const provider = makeProvider(store)
+    const result = await provider.fetch({ url: WATCH })
+    expect(result.body.kind).toBe('text')
+    expect(result.body.content).toContain('## Description')
+    expect(result.body.content).not.toContain('## Transcript')
+    await store.close()
+  })
+
+  it('rejects with WEB_NOT_AVAILABLE when every stage fails', async () => {
+    const store = makeStore()
+    routeWatch({ oembedStatus: 404, vtt: '', html: '<html><head></head><body></body></html>' })
+    const provider = makeProvider(store)
+    await expect(provider.fetch({ url: WATCH })).rejects.toMatchObject({ code: 'WEB_NOT_AVAILABLE' })
+    await store.close()
+  })
+
+  it('serves the watch page as plain HTML when the video feature is disabled', async () => {
+    const store = makeStore()
+    routeWatch()
+    const provider = makeProvider(store, { video: { enabled: false } })
+    const result = await provider.fetch({ url: WATCH })
+    expect(result.body.kind).toBe('html')
+    expect(result.body.content).toContain('watch page')
     await store.close()
   })
 })

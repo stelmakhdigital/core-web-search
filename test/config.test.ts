@@ -16,6 +16,7 @@ describe('resolveCoreConfig', () => {
     expect(config.fetch.maxOutputChars).toBe(100_000)
     expect(config.fetch.allowPrivateNetworks).toBe(false)
     expect(config.fetch.pdf).toEqual({ enabled: true, maxSizeBytes: 20 * 1024 * 1024, maxPages: 50 })
+    expect(config.fetch.video).toEqual({ enabled: true })
     expect(config.store.path).toBe('/tmp/state/web.db')
     expect(config.ssrf.trustEnvProxy).toBe(false)
     expect(config.browser.enabled).toBe(false)

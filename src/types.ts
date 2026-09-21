@@ -272,6 +272,14 @@ export interface CoreConfig {
       /** Maximum pages extracted (head-biased). Default 50. */
       readonly maxPages?: number
     }
+    /**
+     * YouTube video enrichment (roadmap 5.2): watch URLs become a markdown
+     * document (oEmbed + meta description + public transcript). Default enabled.
+     */
+    readonly video?: {
+      /** Enable video enrichment. Default true. */
+      readonly enabled?: boolean
+    }
   }
   readonly platforms?: {
     readonly enabled?: boolean

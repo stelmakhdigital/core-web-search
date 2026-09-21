@@ -55,6 +55,10 @@ export interface ResolvedCoreConfig {
       readonly maxSizeBytes: number
       readonly maxPages: number
     }
+    /** YouTube video enrichment (resolved). */
+    readonly video: {
+      readonly enabled: boolean
+    }
   }
   readonly platforms: {
     readonly enabled: boolean
@@ -178,6 +182,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
       maxSizeBytes: f.pdf?.maxSizeBytes ?? 20 * 1024 * 1024,
       maxPages: f.pdf?.maxPages ?? 50,
     },
+    video: {
+      enabled: f.video?.enabled ?? true,
+    },
   }
   assertPositiveInt('fetch.cacheTtlMs', fetch.cacheTtlMs)
   assertPositiveInt('fetch.maxBodyBytes', fetch.maxBodyBytes)
@@ -191,6 +198,7 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   assertBoolean('fetch.pdf.enabled', fetch.pdf.enabled)
   assertPositiveInt('fetch.pdf.maxSizeBytes', fetch.pdf.maxSizeBytes)
   assertPositiveInt('fetch.pdf.maxPages', fetch.pdf.maxPages)
+  assertBoolean('fetch.video.enabled', fetch.video.enabled)
 
   const p = config.platforms ?? {}
   const platforms = {

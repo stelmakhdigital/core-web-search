@@ -24,6 +24,7 @@ import { deadline, timeoutOf } from '../timeout.ts'
 import type { StoredPage, WebStore } from '../store/index.ts'
 import { extractPdfToMarkdown, type PdfLimits } from './pdf.ts'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
+import { buildVideoDocument, extractMetaDescription, parseOEmbed, parseVideoUrl, vttToTranscript, type OEmbedJson } from './video.ts'
 import { normalizeUrl } from './url.ts'
 import { checkSsrf } from './ssrf.ts'
 
@@ -60,6 +61,11 @@ export interface CachedFetchLimits {
    * with `WEB_UNSUPPORTED_CONTENT_TYPE` when `enabled`.
    */
   pdf: PdfLimits
+  /**
+   * YouTube video enrichment (roadmap 5.2). Watch URLs are enriched into a
+   * markdown document (oEmbed + meta description + public transcript).
+   */
+  video: { readonly enabled: boolean }
 }
 
 /** Stable id this provider registers under. */
@@ -239,11 +245,87 @@ export class CachedHttpFetchProvider {
         continue
       }
 
-      const result = await this.readBody(response, currentUrl, signal)
+      const result = await this.readVideoOrBody(response, currentUrl, signal)
       const etag = response.headers.get('etag') ?? undefined
       const lastModified = response.headers.get('last-modified') ?? undefined
       return { result, ...etag !== undefined ? { etag } : {}, ...lastModified !== undefined ? { lastModified } : {} }
     }
+  }
+
+  /**
+   * The video branch (5.2): a YouTube watch URL fetched as a regular page is
+   * enriched into a markdown document (oEmbed + meta description + public
+   * transcript). Each stage is fail-soft — only when ALL of them fail does
+   * the call reject (`WEB_NOT_AVAILABLE`). Non-video URLs (or the feature
+   * disabled) fall through to the regular body read.
+   */
+  private async readVideoOrBody(response: Response, finalUrl: URL, signal: AbortSignal): Promise<FetchResult> {
+    const target = this.limits.video.enabled ? parseVideoUrl(finalUrl.toString()) : undefined
+    if (target === undefined) return this.readBody(response, finalUrl, signal)
+    const { bytes } = await this.readCapped(response, signal)
+    const html = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+    const description = extractMetaDescription(html)
+    const oembed = await this.videoStage(async () => {
+      const res = await this.videoSubFetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(target.watchUrl)}&format=json`, signal)
+      const json = (await res.json()) as OEmbedJson
+      return parseOEmbed(json)
+    })
+    const transcript = await this.videoStage(async () => {
+      const base = `https://www.youtube.com/api/timedtext?v=${target.videoId}`
+      for (const url of [base, `${base}&kind=asr`]) {
+        const res = await this.videoSubFetch(url, signal)
+        const { bytes: vttBytes } = await this.readCapped(res, signal)
+        const text = vttToTranscript(new TextDecoder('utf-8', { fatal: false }).decode(vttBytes))
+        if (text.trim().length > 0) return text
+      }
+      return undefined
+    })
+    const document = buildVideoDocument({ oembed, description, transcript }, target.watchUrl)
+    if (document === undefined) {
+      throw new CoreError(
+        'no YouTube video data could be extracted (no oEmbed, meta description, or transcript available)',
+        'WEB_NOT_AVAILABLE',
+      )
+    }
+    const truncatedByChars = document.length > this.limits.maxBodyChars
+    const content = truncatedByChars ? document.slice(0, this.limits.maxBodyChars) : document
+    return {
+      url: finalUrl.toString(),
+      statusCode: response.status,
+      body: { kind: 'text', content },
+      truncated: truncatedByChars,
+    }
+  }
+
+  /**
+   * Run one fail-soft video stage: any error (transport, HTTP, parse) yields
+   * `undefined` rather than failing the whole fetch.
+   */
+  private async videoStage<T>(stage: () => Promise<T | undefined>): Promise<T | undefined> {
+    try {
+      return await stage()
+    } catch {
+      return undefined
+    }
+  }
+
+  /** A guarded sub-request for the video stages (SSRF-checked, UA header, non-2xx rejects). */
+  private async videoSubFetch(url: string, signal: AbortSignal): Promise<Response> {
+    const check = await checkSsrf(url, { allowPrivate: this.limits.allowPrivateNetworks })
+    if (!check.allowed) {
+      throw new CoreError(`request to ${new URL(url).host} blocked by the SSRF guard: ${check.reason}`, 'WEB_SSRF_BLOCKED')
+    }
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: { 'user-agent': this.limits.userAgent, accept: 'application/json, text/vtt, text/plain, */*' },
+      signal,
+    })
+    if (response.status < 200 || response.status >= 300) {
+      await response.body?.cancel()
+      throw new CoreError(`video sub-request returned HTTP ${response.status}`, 'WEB_HTTP_ERROR')
+    }
+    return response
   }
 
   private async requestOnce(url: URL, signal: AbortSignal): Promise<Response> {
