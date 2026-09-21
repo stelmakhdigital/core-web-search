@@ -167,7 +167,7 @@ export class CachedHttpFetchProvider {
           body: { kind: 'text', content },
           truncated: truncatedByChars,
         }
-        await this.limits.store.recordPage({
+        const pageId = await this.limits.store.recordPage({
           url: result.url,
           normalizedUrl: normalizeUrl(url.toString()),
           fetchedAt: Date.now(),
@@ -176,12 +176,13 @@ export class CachedHttpFetchProvider {
           body: result.body.content,
           truncated: result.truncated,
         }).catch(() => undefined)
+        return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
         return result
       }
     }
     const { result, etag, lastModified } = await this.followAndRead(url, signal)
     if (result.statusCode >= 200 && result.statusCode < 300) {
-      await this.limits.store.recordPage({
+      const pageId = await this.limits.store.recordPage({
         url: result.url,
         normalizedUrl: normalizeUrl(url.toString()),
         fetchedAt: Date.now(),
@@ -192,6 +193,7 @@ export class CachedHttpFetchProvider {
         body: result.body.content,
         truncated: result.truncated,
       }).catch(() => undefined)
+      return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
     }
     return result
   }
@@ -238,7 +240,7 @@ export class CachedHttpFetchProvider {
       const result = await this.readBody(response, url, d.signal)
       const etag = response.headers.get('etag') ?? undefined
       const lastModified = response.headers.get('last-modified') ?? undefined
-      await this.limits.store.recordPage({
+      const pageId = await this.limits.store.recordPage({
         url: result.url,
         normalizedUrl: key,
         fetchedAt: Date.now(),
@@ -249,6 +251,7 @@ export class CachedHttpFetchProvider {
         body: result.body.content,
         truncated: result.truncated,
       }).catch(() => undefined)
+      return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
       return result
     }
     await response.body?.cancel()
@@ -535,12 +538,13 @@ function isPositiveFinite(value: number): boolean {
 }
 
 /** Rebuild a `FetchResult` from a stored page row. */
-function pageToResult(page: { url: string; statusCode: number; bodyKind: 'html' | 'text'; body: string; truncated: boolean }): FetchResult {
+function pageToResult(page: { id?: number; url: string; statusCode: number; bodyKind: 'html' | 'text'; body: string; truncated: boolean }): FetchResult {
   return {
     url: page.url,
     statusCode: page.statusCode,
     body: page.bodyKind === 'html' ? { kind: 'html', content: page.body } : { kind: 'text', content: page.body },
     truncated: page.truncated,
+    ...(page.id !== undefined && page.id > 0 ? { pageId: page.id } : {}),
   }
 }
 

@@ -345,7 +345,26 @@ export class WebStore {
         entry.truncated ? 1 : 0,
       )
     this.maybeEvict(db)
-    return Number(result.lastInsertRowid)
+    const id = Number(result.lastInsertRowid)
+    if (id > 0) return id
+    // ON CONFLICT DO UPDATE creates no new row (lastInsertRowid stays 0):
+    // the record kept its original id.
+    const row = db.prepare('SELECT id FROM web_pages WHERE normalized_url = ?').get(entry.normalizedUrl) as { id: number } | undefined
+    return row?.id ?? 0
+  }
+
+  /** Read one search record by id (5.5, get_search_content). */
+  async getSearch(id: number): Promise<StoredSearch | undefined> {
+    const db = await this.ensureOpen()
+    const row = db.prepare('SELECT * FROM web_searches WHERE id = ?').get(id) as SearchRow | undefined
+    return row === undefined ? undefined : mapSearchRow(row)
+  }
+
+  /** Read one page record by id (5.5, get_search_content). */
+  async getPage(id: number): Promise<StoredPage | undefined> {
+    const db = await this.ensureOpen()
+    const row = db.prepare('SELECT * FROM web_pages WHERE id = ?').get(id) as PageRow | undefined
+    return row === undefined ? undefined : mapPageRow(row)
   }
 
   /** Read one page record by normalized URL (and mark it accessed for LRU). */

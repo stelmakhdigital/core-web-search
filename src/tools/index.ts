@@ -147,6 +147,7 @@ export function buildSearchTool(host: ToolHost): ToolSpec {
       const seen = new Set<string>()
       const contents: string[] = []
       const enginesUsed = new Set<string>()
+      const searchIds: number[] = []
       let anyTruncated = false
       let fromCache = false
       for (const query of queries) {
@@ -161,6 +162,7 @@ export function buildSearchTool(host: ToolHost): ToolSpec {
           signal,
         )
         if (result.fromCache) fromCache = true
+        if (result.searchId !== undefined) searchIds.push(result.searchId)
         if (result.truncated) anyTruncated = true
         for (const id of result.enginesUsed ?? []) enginesUsed.add(id)
         if (result.content !== undefined && result.content.length > 0) contents.push(result.content)
@@ -171,6 +173,9 @@ export function buildSearchTool(host: ToolHost): ToolSpec {
           merged.push(source)
         }
       }
+      const idsNote = searchIds.length > 0
+        ? `\n\n[search id: ${searchIds.join(', ')} — full answer content via get_search_content {source: 'search', id: N}]`
+        : ''
       const text = formatSearchResult(
         {
           sources: merged.slice(0, maxResults),
@@ -180,12 +185,13 @@ export function buildSearchTool(host: ToolHost): ToolSpec {
         maxResults,
       )
       return {
-        text,
+        text: text + idsNote,
         details: {
           queries,
           engines: [...enginesUsed],
           fromCache,
           sources: merged.slice(0, maxResults),
+          ...searchIds.length > 0 ? { searchIds } : {},
         },
       }
     }),
@@ -237,7 +243,8 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
       const maxChars = host.config.fetch.maxOutputChars
       const truncated = result.truncated || content.length > maxChars
       if (content.length > maxChars) content = `${content.slice(0, maxChars)}\n[...truncated...]`
-      const header = `Fetched ${result.url} (HTTP ${result.statusCode}, ${result.body.kind}${result.fromCache ? ', cache' : ''}, ${content.length} chars${truncated ? ', truncated' : ''})`
+      const header = `Fetched ${result.url} (HTTP ${result.statusCode}, ${result.body.kind}${result.fromCache ? ', cache' : ''}, ${content.length} chars${truncated ? ', truncated' : ''})` +
+        (result.pageId !== undefined ? ` [page id: ${result.pageId} — full document via get_search_content {source: 'page', id: ${result.pageId}}]` : '')
       if (question !== undefined && mode !== 'raw') {
         return answerFromLlm(host, question, content, result, header, signal)
       }
@@ -251,6 +258,152 @@ export function buildFetchTool(host: ToolHost): ToolSpec {
           truncated,
         },
       }
+    }),
+  }
+}
+
+/** get_search_content window (5.5): default/max chars and findText shape. */
+const GET_CONTENT_DEFAULT_LIMIT = 20_000
+const GET_CONTENT_MAX_LIMIT = 100_000
+const GET_CONTENT_MAX_MATCHES = 3
+const GET_CONTENT_MATCH_CONTEXT = 400
+
+/**
+ * The `get_search_content` tool (5.5): read the full content of a cached
+ * search answer or fetched page by web store record id (the ids are printed
+ * in the web_search / web_fetch output). `findText` searches the stored
+ * content case-insensitively and returns context windows around the first
+ * matches; otherwise an `offset`/`limit` character window is returned.
+ */
+export function buildGetSearchContentTool(host: ToolHost): ToolSpec {
+  return {
+    name: 'get_search_content',
+    description:
+      'Read the full cached content of a previous web_search answer or web_fetch document. ' +
+      'Use the record id printed in the web_search / web_fetch output. ' +
+      'Without findText returns a character window (offset/limit); with findText returns context windows around the first matches.',
+    maxOutputChars: GET_CONTENT_MAX_LIMIT,
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          enum: ['search', 'page'],
+          description: "Which store: 'search' (a web_search answer) or 'page' (a fetched document).",
+        },
+        id: { type: 'integer', description: 'The web store record id printed by web_search / web_fetch.' },
+        findText: {
+          type: 'string',
+          description: 'Optional case-insensitive substring to locate in the content (up to 3 matches, context windows around each).',
+        },
+        offset: {
+          type: 'integer',
+          description: 'Character offset for the window (ignored when findText is set). Default 0.',
+          minimum: 0,
+        },
+        limit: {
+          type: 'integer',
+          description: 'Maximum characters to return (1-100000). Default 20000.',
+          minimum: 1,
+          maximum: GET_CONTENT_MAX_LIMIT,
+        },
+      },
+      required: ['source', 'id'],
+      additionalProperties: false,
+    },
+    execute: guarded(async (args): Promise<ToolOutput> => {
+      const record = asRecord(args)
+      const source = record['source'] === 'search' || record['source'] === 'page' ? record['source'] : undefined
+      if (source === undefined) {
+        throw new CoreError("source must be 'search' or 'page'", 'WEB_BAD_REQUEST')
+      }
+      const id =
+        typeof record['id'] === 'number' && Number.isInteger(record['id']) && (record['id'] as number) >= 1
+          ? (record['id'] as number)
+          : (() => { throw new CoreError('id must be a positive integer', 'WEB_BAD_REQUEST') })()
+      const findText = typeof record['findText'] === 'string' && (record['findText'] as string).length > 0
+        ? (record['findText'] as string)
+        : undefined
+      const offset =
+        record['offset'] === undefined
+          ? 0
+          : typeof record['offset'] === 'number' && Number.isInteger(record['offset']) && record['offset'] >= 0
+            ? (record['offset'] as number)
+            : (() => { throw new CoreError('offset must be a non-negative integer', 'WEB_BAD_REQUEST') })()
+      const limit =
+        record['limit'] === undefined
+          ? GET_CONTENT_DEFAULT_LIMIT
+          : typeof record['limit'] === 'number' && Number.isInteger(record['limit']) && record['limit'] >= 1 && record['limit'] <= GET_CONTENT_MAX_LIMIT
+            ? (record['limit'] as number)
+            : (() => {
+                throw new CoreError(`limit must be an integer between 1 and ${GET_CONTENT_MAX_LIMIT}`, 'WEB_BAD_REQUEST')
+              })()
+
+      let content: string
+      let title: string
+      let truncated: boolean
+      if (source === 'search') {
+        const stored = await host.store.getSearch(id)
+        if (stored === undefined) {
+          throw new CoreError(`no search record with id ${id} in the web store`, 'WEB_BAD_REQUEST')
+        }
+        content = stored.content ?? ''
+        title = `"${stored.query}"`
+        truncated = stored.truncated
+      } else {
+        const stored = await host.store.getPage(id)
+        if (stored === undefined) {
+          throw new CoreError(`no page record with id ${id} in the web store`, 'WEB_BAD_REQUEST')
+        }
+        content = stored.body
+        title = stored.url
+        truncated = stored.truncated
+      }
+      const total = content.length
+      const header =
+        `${source === 'search' ? 'Search' : 'Page'} #${id} ${title} — ${total} chars stored` +
+        `${truncated ? ' (truncated at fetch time)' : ''}`
+
+      if (total === 0) {
+        return { text: `${header}\n(no stored content for this record)` }
+      }
+
+      if (findText !== undefined) {
+        const haystack = content.toLowerCase()
+        const needle = findText.toLowerCase()
+        if (needle.length === 0) throw new CoreError('findText must be non-empty', 'WEB_BAD_REQUEST')
+        const matches: number[] = []
+        let cursor = 0
+        while (matches.length < GET_CONTENT_MAX_MATCHES) {
+          const at = haystack.indexOf(needle, cursor)
+          if (at === -1) break
+          matches.push(at)
+          cursor = at + needle.length
+        }
+        if (matches.length === 0) {
+          return { text: `${header}\nno occurrences of "${findText}" in the stored content` }
+        }
+        const windows = matches.map((at, index) => {
+          const start = Math.max(0, at - GET_CONTENT_MATCH_CONTEXT)
+          const end = Math.min(total, at + findText.length + GET_CONTENT_MATCH_CONTEXT)
+          const prefix = start > 0 ? '…' : ''
+          const suffix = end < total ? '…' : ''
+          return `[match ${index + 1}/${matches.length} at char ${at}]\n${prefix}${content.slice(start, end)}${suffix}`
+        })
+        const more = matches.length === GET_CONTENT_MAX_MATCHES && haystack.indexOf(needle, matches[matches.length - 1]! + needle.length) !== -1
+          ? `\n[more matches exist; only the first ${GET_CONTENT_MAX_MATCHES} are shown]`
+          : ''
+        const text = `${header}\nmatches for "${findText}" (${matches.length} shown):\n\n${windows.join('\n\n')}${more}`
+        const capped = text.length > GET_CONTENT_MAX_LIMIT ? `${text.slice(0, GET_CONTENT_MAX_LIMIT)}\n[...truncated...]` : text
+        return { text: capped }
+      }
+
+      const clampedOffset = Math.min(offset, total)
+      const windowText = content.slice(clampedOffset, clampedOffset + limit)
+      const remainder = total - clampedOffset - windowText.length
+      const tail = remainder > 0 ? `\n[...${remainder} more chars — continue with offset ${clampedOffset + windowText.length}]` : ''
+      const text = `${header}\nwindow ${clampedOffset}-${clampedOffset + windowText.length}:\n${windowText}${tail}`
+      return { text, details: { source, id, total, offset: clampedOffset, returned: windowText.length } }
     }),
   }
 }
@@ -482,6 +635,7 @@ export function buildCoreTools(host: ToolHost): ToolSpec[] {
   const tools: ToolSpec[] = [
     buildSearchTool(host),
     buildFetchTool(host),
+    buildGetSearchContentTool(host),
     buildPlatformSearchTool(host),
     buildHistoryTool(host),
     buildStatsTool(host),

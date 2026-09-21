@@ -53,10 +53,10 @@ describe('createWebStack', () => {
     expect(registered).toBeUndefined()
   })
 
-  it('tools() returns the six v1.0 specs', () => {
+  it('tools() returns the seven v1.0 specs', () => {
     const tools = stack!.tools()
     expect(tools.map((tool) => tool.name)).toEqual([
-      'web_search', 'web_fetch', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear',
+      'web_search', 'web_fetch', 'get_search_content', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear',
     ])
   })
 
@@ -128,11 +128,11 @@ describe('createWebStack with the browser module (browser.enabled)', () => {
     expect(browserStack?.browser).toBeDefined()
     expect(browserStack!.browser!.providerId).toBe('playwright')
     const names = browserStack!.tools().map((tool) => tool.name)
-    expect(names).toHaveLength(14)
+    expect(names).toHaveLength(15)
     expect(names).toContain('browser_open')
     expect(names).toContain('browser_close')
-    expect(names.slice(0, 6)).toEqual([
-      'web_search', 'web_fetch', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear',
+    expect(names.slice(0, 7)).toEqual([
+      'web_search', 'web_fetch', 'get_search_content', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear',
     ])
   })
 

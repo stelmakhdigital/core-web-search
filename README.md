@@ -57,15 +57,17 @@ web-search внутри LLM-вызова (один LLM-запрос на пои�
 `web_fetch` (readable→markdown / raw), `web_platform_search`
 (github, reddit, youtube, bilibili, v2ex, rss + настраиваемые),
 `web_history`, `web_search_stats`, `web_cache_clear`, `web_curator`
-(`extended.curator.enabled`, roadmap 5.4).
+(`extended.curator.enabled`, roadmap 5.4), `get_search_content` (5.5).
 
-Phase 5 (выполнено 5.1–5.4): расширенный fetch — PDF (локальный unpdf,
+Phase 5 (выполнено 5.1–5.5): расширенный fetch — PDF (локальный unpdf,
 `fetch.pdf`), YouTube-документы (oEmbed + description + транскрипт,
 `fetch.video`), GitHub (клонирование вместо скрейпинга: repo/tree/blob —
 shallow clone с кэшем и порогом размера, PR/issue — keyless REST API,
 `fetch.github`), curator UI (локальный HTTP-сервер 127.0.0.1 + token:
 ревизия поисков/страниц, LLM-саммари через `HostAdapter.llm`, discard —
-`extended.curator`). `get_search_content` — 5.5.
+`extended.curator`), `get_search_content` (5.5: чтение полного закэшированного
+контента по id записи — `findText`/`offset`/`limit`; id печатаются в выводах
+`web_search`/`web_fetch`; `SearchResult.searchId`/`FetchResult.pageId`).
 
 ## Конфигурация
 

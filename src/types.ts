@@ -43,6 +43,8 @@ export interface SearchResult {
   readonly enginesUsed?: readonly string[]
   /** True when the result came from the search cache. */
   readonly fromCache?: boolean
+  /** Web store record id (5.5) — address the full cached content via get_search_content. */
+  readonly searchId?: number
 }
 
 /** One fetch of a URL. */
@@ -68,6 +70,8 @@ export interface FetchResult {
   readonly fromCache?: boolean
   /** Content kind auto-detection (phase 5: github/youtube/pdf/video/image). */
   readonly kind?: 'web' | 'github' | 'youtube' | 'pdf' | 'video' | 'image'
+  /** Web store page record id (5.5) — address the full cached content via get_search_content. */
+  readonly pageId?: number
 }
 
 /** One platform search (config-driven platform endpoints; see ADR-003 §5). */

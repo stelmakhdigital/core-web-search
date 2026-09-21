@@ -30,10 +30,10 @@ const noop = { signal: new AbortController().signal }
 describe('buildCoreTools', () => {
   afterEach(() => undefined)
 
-  it('exposes the six v1.0 tools in order', () => {
+  it('exposes the seven v1.0 tools in order', () => {
     const { host } = makeHost()
     const names = buildCoreTools(host).map((tool) => tool.name)
-    expect(names).toEqual(['web_search', 'web_fetch', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear'])
+    expect(names).toEqual(['web_search', 'web_fetch', 'get_search_content', 'web_platform_search', 'web_history', 'web_search_stats', 'web_cache_clear'])
     for (const tool of buildCoreTools(host)) {
       expect(tool.parameters.type).toBe('object')
       expect(tool.description.length).toBeGreaterThan(10)
@@ -44,7 +44,31 @@ describe('buildCoreTools', () => {
     const { host } = makeHost({ platformsEnabled: false })
     const names = buildCoreTools(host).map((tool) => tool.name)
     expect(names).not.toContain('web_platform_search')
-    expect(names).toHaveLength(5)
+    expect(names).toHaveLength(6)
+  })
+
+  it('prints the web store record ids for get_search_content (5.5)', async () => {
+    const { host } = makeHost({
+      search: async () => ({
+        sources: [{ url: 'https://example.com/a', title: 'A' }],
+        truncated: false,
+        searchId: 42,
+        fromCache: true,
+      } satisfies SearchResult),
+      fetch: async () => ({
+        url: 'https://example.com/doc',
+        statusCode: 200,
+        body: { kind: 'text', content: 'doc body' },
+        truncated: false,
+        pageId: 7,
+      } satisfies FetchResult),
+    })
+    const tools = new Map(buildCoreTools(host).map((tool) => [tool.name, tool]))
+    const searched = await tools.get('web_search')!.execute({ queries: ['ids'] }, noop)
+    expect(searched.text).toContain('[search id: 42 — full answer content via get_search_content {source: \'search\', id: N}]')
+    const fetched = await tools.get('web_fetch')!.execute({ url: 'https://example.com/doc' }, noop)
+    expect(fetched.text).toContain('[page id: 7 — full document via get_search_content {source: \'page\', id: 7}]')
+    await host.store.close()
   })
 
   it('web_search merges multiple queries and deduplicates by URL', async () => {

@@ -90,6 +90,8 @@ export class MultiSearchProvider {
         sources: cached.sources as readonly SearchSource[],
         ...cached.content !== undefined ? { content: cached.content } : {},
         truncated: cached.truncated,
+        fromCache: true,
+        searchId: cached.id,
       })
     }
 
@@ -120,12 +122,7 @@ export class MultiSearchProvider {
     }
 
     const truncated = sources.length >= maxResults
-    const result: SearchResult = {
-      sources,
-      ...content !== undefined ? { content } : {},
-      truncated,
-    }
-    await this.options.store.recordSearch({
+    const searchId = await this.options.store.recordSearch({
       cacheKey,
       query,
       engines: engineIds,
@@ -134,6 +131,12 @@ export class MultiSearchProvider {
       truncated,
       ...content !== undefined ? { content } : {},
     }).catch(() => undefined)
+    const result: SearchResult = {
+      sources,
+      ...content !== undefined ? { content } : {},
+      truncated,
+      ...(searchId !== undefined && searchId > 0 ? { searchId } : {}),
+    }
     this.options.logger?.info('web-search: completed', { query, engines: engineIds, sources: sources.length, latencyMs: Date.now() - startedAt })
     return cloneSearchResult(result)
   }
@@ -250,5 +253,8 @@ function cloneSearchResult(result: SearchResult): SearchResult {
     sources: result.sources.map(source => ({ ...source })),
     ...result.content !== undefined ? { content: result.content } : {},
     truncated: result.truncated,
+    ...result.enginesUsed !== undefined ? { enginesUsed: [...result.enginesUsed] } : {},
+    ...result.fromCache !== undefined ? { fromCache: result.fromCache } : {},
+    ...result.searchId !== undefined ? { searchId: result.searchId } : {},
   }
 }

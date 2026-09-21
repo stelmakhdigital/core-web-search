@@ -87,6 +87,7 @@ export {
   buildCoreTools,
   buildSearchTool,
   buildFetchTool,
+  buildGetSearchContentTool,
   buildPlatformSearchTool,
   buildHistoryTool,
   buildStatsTool,
