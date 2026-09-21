@@ -59,6 +59,12 @@ export interface ResolvedCoreConfig {
     readonly video: {
       readonly enabled: boolean
     }
+    /** GitHub enrichment (resolved). */
+    readonly github: {
+      readonly enabled: boolean
+      readonly maxCloneBytes: number
+      readonly maxTreeEntries: number
+    }
   }
   readonly platforms: {
     readonly enabled: boolean
@@ -185,6 +191,11 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
     video: {
       enabled: f.video?.enabled ?? true,
     },
+    github: {
+      enabled: f.github?.enabled ?? true,
+      maxCloneBytes: f.github?.maxCloneBytes ?? 200 * 1024 * 1024,
+      maxTreeEntries: f.github?.maxTreeEntries ?? 500,
+    },
   }
   assertPositiveInt('fetch.cacheTtlMs', fetch.cacheTtlMs)
   assertPositiveInt('fetch.maxBodyBytes', fetch.maxBodyBytes)
@@ -199,6 +210,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   assertPositiveInt('fetch.pdf.maxSizeBytes', fetch.pdf.maxSizeBytes)
   assertPositiveInt('fetch.pdf.maxPages', fetch.pdf.maxPages)
   assertBoolean('fetch.video.enabled', fetch.video.enabled)
+  assertBoolean('fetch.github.enabled', fetch.github.enabled)
+  assertPositiveInt('fetch.github.maxCloneBytes', fetch.github.maxCloneBytes)
+  assertPositiveInt('fetch.github.maxTreeEntries', fetch.github.maxTreeEntries)
 
   const p = config.platforms ?? {}
   const platforms = {

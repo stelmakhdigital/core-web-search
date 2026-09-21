@@ -25,6 +25,7 @@ import type { StoredPage, WebStore } from '../store/index.ts'
 import { extractPdfToMarkdown, type PdfLimits } from './pdf.ts'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
 import { buildVideoDocument, extractMetaDescription, parseOEmbed, parseVideoUrl, vttToTranscript, type OEmbedJson } from './video.ts'
+import { fetchGitHubDocument, parseGitHubUrl } from './github.ts'
 import { normalizeUrl } from './url.ts'
 import { checkSsrf } from './ssrf.ts'
 
@@ -66,6 +67,19 @@ export interface CachedFetchLimits {
    * markdown document (oEmbed + meta description + public transcript).
    */
   video: { readonly enabled: boolean }
+  /**
+   * GitHub enrichment (roadmap 5.3). Repository/tree/file URLs are served
+   * from a shallow clone; PR/issue URLs from the keyless REST API.
+   */
+  github: {
+    readonly enabled: boolean
+    readonly maxCloneBytes: number
+    readonly maxTreeEntries: number
+    readonly maxFileBytes: number
+    readonly clonesDir: string
+    /** Test-only override for the git clone source. */
+    readonly sourceResolver?: (t: import('./github.ts').GitHubTarget) => string
+  }
 }
 
 /** Stable id this provider registers under. */
@@ -126,6 +140,45 @@ export class CachedHttpFetchProvider {
 
   /** Fetch from the network, cache a 2xx result, and return it. */
   private async fetchFresh(url: URL, signal: AbortSignal): Promise<FetchResult> {
+    // GitHub branch (5.3): repository URLs are served from a shallow clone or
+    // the keyless API — no HTML scrape of github.com needed. Runs BEFORE the
+    // network request; the document is cached like any text page.
+    if (this.limits.github.enabled) {
+      const target = parseGitHubUrl(url.toString())
+      if (target !== undefined) {
+        const document = await fetchGitHubDocument(
+          target,
+          {
+            enabled: this.limits.github.enabled,
+            maxCloneBytes: this.limits.github.maxCloneBytes,
+            maxTreeEntries: this.limits.github.maxTreeEntries,
+            maxFileBytes: this.limits.github.maxFileBytes,
+            clonesDir: this.limits.github.clonesDir,
+            userAgent: this.limits.userAgent,
+            sourceResolver: this.limits.github.sourceResolver,
+          },
+          signal,
+        )
+        const truncatedByChars = document.length > this.limits.maxBodyChars
+        const content = truncatedByChars ? document.slice(0, this.limits.maxBodyChars) : document
+        const result: FetchResult = {
+          url: url.toString(),
+          statusCode: 200,
+          body: { kind: 'text', content },
+          truncated: truncatedByChars,
+        }
+        await this.limits.store.recordPage({
+          url: result.url,
+          normalizedUrl: normalizeUrl(url.toString()),
+          fetchedAt: Date.now(),
+          statusCode: 200,
+          bodyKind: 'text',
+          body: result.body.content,
+          truncated: result.truncated,
+        }).catch(() => undefined)
+        return result
+      }
+    }
     const { result, etag, lastModified } = await this.followAndRead(url, signal)
     if (result.statusCode >= 200 && result.statusCode < 300) {
       await this.limits.store.recordPage({

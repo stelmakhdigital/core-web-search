@@ -9,6 +9,8 @@
  * @module @agents-web-search/core/fetch
  */
 
+import path from 'node:path'
+
 import type { ResolvedCoreConfig } from '../config.ts'
 import type { WebStore } from '../store/index.ts'
 import type { CachedFetchLimits } from './provider.ts'
@@ -43,5 +45,12 @@ export function buildFetchLimits(
     allowPrivateNetworks: config.fetch.allowPrivateNetworks,
     pdf: config.fetch.pdf,
     video: config.fetch.video,
+    github: {
+      enabled: config.fetch.github.enabled,
+      maxCloneBytes: config.fetch.github.maxCloneBytes,
+      maxTreeEntries: config.fetch.github.maxTreeEntries,
+      maxFileBytes: config.fetch.maxBodyBytes,
+      clonesDir: path.join(path.dirname(config.store.path), 'github-clones'),
+    },
   }
 }

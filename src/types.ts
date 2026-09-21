@@ -280,6 +280,18 @@ export interface CoreConfig {
       /** Enable video enrichment. Default true. */
       readonly enabled?: boolean
     }
+    /**
+     * GitHub enrichment (roadmap 5.3): repository/tree/file URLs from a shallow
+     * clone, PR/issue URLs from the keyless REST API. Default enabled.
+     */
+    readonly github?: {
+      /** Enable GitHub enrichment. Default true. */
+      readonly enabled?: boolean
+      /** Maximum clone size (bytes); oversized clones are deleted. Default 200 MiB. */
+      readonly maxCloneBytes?: number
+      /** Maximum tree listing entries. Default 500. */
+      readonly maxTreeEntries?: number
+    }
   }
   readonly platforms?: {
     readonly enabled?: boolean

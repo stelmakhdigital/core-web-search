@@ -40,6 +40,7 @@ function makeProvider(store: WebStore, overrides: Record<string, unknown> = {}):
     allowPrivateNetworks: false,
     pdf: { enabled: true, maxSizeBytes: 2_000_000, maxPages: 5 },
     video: { enabled: true },
+    github: { enabled: true, maxCloneBytes: 10 * 1024 * 1024, maxTreeEntries: 500, maxFileBytes: 1024 * 1024, clonesDir: '/tmp/web-search-clones' },
     ...overrides,
   })
 }
