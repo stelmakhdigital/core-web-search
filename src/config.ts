@@ -306,7 +306,11 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
       host: e.curator?.host ?? 'localhost',
       remote: e.curator?.remote ?? false,
     },
-    contentCache: {
+    // Reserved (6.5): the in-memory get_search_content cache is deferred in
+  // v0.1 (content is served from the WebStore); these limits are resolved
+  // and validated but have no effect yet. Do not rely on them until the
+  // in-memory cache lands.
+  contentCache: {
       maxEntries: e.contentCache?.maxEntries ?? 128,
       maxBytes: e.contentCache?.maxBytes ?? 128 * 1024 * 1024,
       ttlMs: e.contentCache?.ttlMs ?? 60 * 60 * 1000,

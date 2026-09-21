@@ -81,6 +81,35 @@ shallow clone с кэшем и порогом размера, PR/issue — keyle
 web_fetch, curator-саммари) требуют `HostAdapter.llm` — без него fail-closed
 `WEB_NOT_AVAILABLE`.
 
+## Лимиты (roadmap 6.5, проверено 2026-09-21)
+
+Все лимиты — в `config` (валидируются при `resolveCoreConfig`; нарушение →
+`WEB_BAD_REQUEST`), значения по умолчанию:
+
+| Область | Лимит | Дефолт | Примечание |
+|---|---|---|---|
+| search | `timeoutMs` | 30 s | таймаут одного запроса к движку |
+| search | `rateLimitPerSec` | 1 | token-bucket на движок (burst = perSec) |
+| search | `cacheTtlMs` | 15 min | кэш результатов поиска (WebStore) |
+| search | `maxSerpBytes` | 2 MB | потолок тела SERP |
+| search | enrich `fetchLimit`/`keep`/`fetchTimeoutMs` | 6/5/10 s | fetch-обогащение сниппетов |
+| search | cooldown | 30 s → ×2 → 1 h | экспоненциальный backoff упавшего движка (константы стека, не конфиг) |
+| fetch | `cacheTtlMs` | 24 h | кэш страниц (WebStore) |
+| fetch | `maxBodyBytes` / `maxOutputChars` | 5 MB / 100 k | обрезка тела / вывода |
+| fetch | `timeoutMs` / `maxRedirects` | 30 s / 5 | редиректы — same-origin + SSRF-хоп-гард |
+| fetch.pdf | `maxSizeBytes` / `maxPages` | 20 MB / 50 | |
+| fetch.github | `maxCloneBytes` / `maxTreeEntries` | 200 MB / 500 | shallow-клон кэш |
+| platforms | `maxResults` / `timeoutMs` / `maxBytes` | 20 / 30 s / 5 MB | |
+| store | `evictLimits` | 1000 / 500 | eviction старых записей (searches/pages) |
+| browser | `maxConcurrentTabs` / `timeoutMs` | 1 / 30 s | таймаут — на `page.goto` и операции |
+| tools | `web_search.max_results` | 5 (1–20) | выход за диапазон → `WEB_BAD_REQUEST` |
+| curator | prompt / `maxTokens` / body / entries | 20 k / 512 / 1 MiB / 50 | лимиты LLM-вывода: 512 токена (advisory для хоста) |
+
+**Зарезервировано (no-op в v0.1):** `extended.contentCache` (128 записей /
+128 MiB / 1 ч) — in-memory-кэш `get_search_content` отложен; конфиг
+валидируется, эффекта пока нет (контент приходит из WebStore). Коoldown
+движков — константы стека (30 s / 1 h), в конфиг не вынесены.
+
 ## Безопасность
 
 Security-ревью 2026-09-21 (roadmap 6.3) — состояние:

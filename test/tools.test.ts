@@ -98,6 +98,17 @@ describe('buildCoreTools', () => {
     expect(out.text).toContain('2. B')
   })
 
+  it('rejects out-of-range max_results with WEB_BAD_REQUEST (6.5 limits)', async () => {
+    const { host } = makeHost()
+    const spec = buildCoreTools(host).find((tool) => tool.name === 'web_search')!
+    const tooMany = await spec.execute({ queries: ['q'], max_results: 21 }, noop)
+    expect(tooMany.isError).toBe(true)
+    expect(tooMany.text).toContain('max_results must be an integer between 1 and 20')
+    const tooFew = await spec.execute({ queries: ['q'], max_results: 0 }, noop)
+    expect(tooFew.isError).toBe(true)
+    expect(tooFew.text).toContain('WEB_BAD_REQUEST')
+  })
+
   it('web_search truncates to max_results', async () => {
     const sources = Array.from({ length: 30 }, (_, i) => ({ url: `https://example.com/${i}` }))
     const { host } = makeHost({ search: async () => ({ sources, truncated: true }) })
