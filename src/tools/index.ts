@@ -419,6 +419,64 @@ export function buildCacheClearTool(host: ToolHost): ToolSpec {
   }
 }
 
+/** The `web_curator` tool spec (roadmap 5.4): start/status/stop the local
+ * curator UI server. The running server is kept per host (WeakMap). */
+export function buildCuratorTool(host: ToolHost): ToolSpec {
+  const servers = new WeakMap<object, import('../curator/index.ts').CuratorHandle>()
+  return {
+    name: 'web_curator',
+    description:
+      'Manage the local curator UI: a token-protected 127.0.0.1 web page where a human can review recent ' +
+      'web searches and fetched pages, generate LLM summaries, and discard entries. ' +
+      "action 'start' returns the URL (with token) to open in a browser; 'status' reports the running server; " +
+      "'stop' closes it.",
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'status', 'stop'],
+          description: "start | status | stop the curator server.",
+        },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    execute: guarded(async (args: { action?: unknown }, _ctx) => {
+      const action = typeof args.action === 'string' ? args.action : undefined
+      if (action !== 'start' && action !== 'status' && action !== 'stop') {
+        throw new CoreError('action must be "start", "status", or "stop"', 'WEB_BAD_REQUEST')
+      }
+      const running = servers.get(host)
+      if (action === 'status') {
+        if (running === undefined) return { text: 'No curator server is running. Use action "start" first.' }
+        return { text: `Curator running at ${running.url}` }
+      }
+      if (action === 'stop') {
+        if (running === undefined) return { text: 'No curator server is running.' }
+        servers.delete(host)
+        await running.close()
+        return { text: `Curator server stopped (port ${running.port}).` }
+      }
+      if (running !== undefined) return { text: `Curator already running at ${running.url}` }
+      const { startCuratorServer } = await import('../curator/index.ts')
+      const handle = await startCuratorServer({
+        store: host.store,
+        llm: host.llm,
+        bind: host.config.extended.curator.bind,
+        maxEntries: 50,
+      })
+      servers.set(host, handle)
+      const lines = [
+        `Curator started at ${handle.url}`,
+        'Open the URL in a browser to review searches/pages (Summarize needs a host LLM client; it fails closed without one).',
+        `Stop it later with action "stop".`,
+      ]
+      return { text: lines.join('\n') }
+    }),
+  }
+}
+
 /** Build all v1.0 tool specs for the host. */
 export function buildCoreTools(host: ToolHost): ToolSpec[] {
   const tools: ToolSpec[] = [
@@ -429,6 +487,7 @@ export function buildCoreTools(host: ToolHost): ToolSpec[] {
     buildStatsTool(host),
     buildCacheClearTool(host),
   ]
+  if (host.config.extended.curator.enabled) tools.push(buildCuratorTool(host))
   return host.config.platforms.enabled === false
     ? tools.filter((tool) => tool.name !== 'web_platform_search')
     : tools

@@ -306,6 +306,13 @@ export class WebStore {
     return Number(result.changes)
   }
 
+  /** Delete one search record by id (curator discard). Returns true when a row was deleted. */
+  async deleteSearch(id: number): Promise<boolean> {
+    const db = await this.ensureOpen()
+    const result = db.prepare('DELETE FROM web_searches WHERE id = ?').run(id)
+    return Number(result.changes) > 0
+  }
+
   /** Insert or update one page record by normalized URL. Returns the row id. */
   async recordPage(entry: PageRecordInput): Promise<number> {
     const db = await this.ensureOpen()
@@ -372,6 +379,13 @@ export class WebStore {
     const db = await this.ensureOpen()
     const result = db.prepare('DELETE FROM web_pages').run()
     return Number(result.changes)
+  }
+
+  /** Delete one page record by id (curator discard). Returns true when a row was deleted. */
+  async deletePage(id: number): Promise<boolean> {
+    const db = await this.ensureOpen()
+    const result = db.prepare('DELETE FROM web_pages WHERE id = ?').run(id)
+    return Number(result.changes) > 0
   }
 
   /** Store statistics. */

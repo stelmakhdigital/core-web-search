@@ -56,9 +56,16 @@ web-search внутри LLM-вызова (один LLM-запрос на пои�
 `web_search` (1–4 запросов, max_results ≤ 20, recency, domains, engine),
 `web_fetch` (readable→markdown / raw), `web_platform_search`
 (github, reddit, youtube, bilibili, v2ex, rss + настраиваемые),
-`web_history`, `web_search_stats`, `web_cache_clear`.
-Phase 5 добавит `get_search_content`, расширенный fetch (PDF/YouTube/GitHub)
-и curator UI (ADR-006).
+`web_history`, `web_search_stats`, `web_cache_clear`, `web_curator`
+(`extended.curator.enabled`, roadmap 5.4).
+
+Phase 5 (выполнено 5.1–5.4): расширенный fetch — PDF (локальный unpdf,
+`fetch.pdf`), YouTube-документы (oEmbed + description + транскрипт,
+`fetch.video`), GitHub (клонирование вместо скрейпинга: repo/tree/blob —
+shallow clone с кэшем и порогом размера, PR/issue — keyless REST API,
+`fetch.github`), curator UI (локальный HTTP-сервер 127.0.0.1 + token:
+ревизия поисков/страниц, LLM-саммари через `HostAdapter.llm`, discard —
+`extended.curator`). `get_search_content` — 5.5.
 
 ## Конфигурация
 
@@ -67,7 +74,10 @@ Phase 5 добавит `get_search_content`, расширенный fetch (PDF/Y
 стек. Ключевые блоки: `search` (engines, mode fallback|fuse, enrich, embed),
 `fetch` (кэш 24ч, maxBody 5 MiB, SSRF), `platforms`, `store`, `ssrf`
 (trustEnvProxy), `browser` (Playwright, по умолчанию off), `providers`,
-`extended` (phase 5).
+`extended` (phase 5: curator UI), `fetch.pdf` / `fetch.video` /
+`fetch.github` (расширенный fetch, phase 5). LLM-возможности (question-режим
+web_fetch, curator-саммари) требуют `HostAdapter.llm` — без него fail-closed
+`WEB_NOT_AVAILABLE`.
 
 ## Безопасность
 

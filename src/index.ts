@@ -55,6 +55,7 @@ export type {
 
 // Store
 export { WebStore } from './store/index.ts'
+export { startCuratorServer, isLoopback, type CuratorOptions, type CuratorHandle, type CuratorEntry } from './curator/index.ts'
 export type {
   WebStoreOptions,
   StoredSearch,
