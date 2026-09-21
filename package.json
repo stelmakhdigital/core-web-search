@@ -35,7 +35,8 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint:no-host-imports": "node scripts/no-host-imports.mjs"
+    "lint:no-host-imports": "node scripts/no-host-imports.mjs",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
@@ -50,5 +51,13 @@
     "esbuild": "^0.28.1",
     "typescript": "^5.6.0",
     "vitest": "^4.1.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stelmakhdigital/core-web-search.git"
+  },
+  "homepage": "https://github.com/stelmakhdigital/core-web-search#readme",
+  "bugs": {
+    "url": "https://github.com/stelmakhdigital/core-web-search/issues"
   }
 }
