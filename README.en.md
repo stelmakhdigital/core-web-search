@@ -236,7 +236,8 @@ Security review 2026-09-21 (roadmap 6.3):
 
 An optional core module (Q8): Playwright is an optional dependency
 (installed only with `browser.enabled: true`). Tools: `browser_open`,
-`browser_navigate`, `browser_screenshot` (PNG in the state dir, optionally
+`browser_navigate`, `browser_snapshot` (interactive elements with refs +
+text), `browser_screenshot` (PNG in the state dir, optionally
 inlined), `browser_click`/`browser_type`/`browser_evaluate` (per
 `approval`), `browser_close`. Configuration — the `browser` block (see the
 reference). SSRF check on open/navigate; timeouts on `page.goto` and

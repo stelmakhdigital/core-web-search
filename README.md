@@ -271,8 +271,9 @@ isError: true}`.
 
 Опциональный модуль ядра (Q8): Playwright — optional dependency (ставится
 только при `browser.enabled: true`). Инструменты: `browser_open`,
-`browser_navigate`, `browser_screenshot` (PNG в state dir, опционально
-inline), `browser_click`/`browser_type`/`browser_evaluate` (по
+`browser_navigate`, `browser_snapshot` (интерактивные элементы с ref +
+текст), `browser_screenshot` (PNG в state dir, опционально inline),
+`browser_click`/`browser_type`/`browser_evaluate` (по
 `approval`), `browser_close`. Настройки — блок `browser` (см. референс).
 SSRF-проверка на open/navigate; таймаут на `page.goto` и операции;
 одна вкладка по умолчанию (`maxConcurrentTabs`). Ограничения v0.1:
