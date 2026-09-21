@@ -625,6 +625,13 @@ export function buildCuratorTool(host: ToolHost): ToolSpec {
         'Open the URL in a browser to review searches/pages (Summarize needs a host LLM client; it fails closed without one).',
         `Stop it later with action "stop".`,
       ]
+      if (host.config.extended.curator.remote) {
+        lines.push(
+          'NOTE: remote curator access is configured but deferred in v0.1 — the server is bound to ' +
+          'loopback only (127.0.0.1) and speaks plain HTTP with no TLS; keep it local and do not ' +
+          'port-forward the token URL.',
+        )
+      }
       return { text: lines.join('\n') }
     }),
   }

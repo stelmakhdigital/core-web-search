@@ -378,6 +378,29 @@ describe('CachedHttpFetchProvider — YouTube video enrichment (5.2)', () => {
     await store.close()
   })
 
+  it('never follows a video sub-request redirect to a private address (SSRF hop guard)', async () => {
+    const store = makeStore()
+    fetchMock.mockImplementation((input: URL | string) => {
+      const u = typeof input === 'string' ? input : input.toString()
+      if (u.startsWith('https://www.youtube.com/oembed')) {
+        // A (malicious) 302 towards the cloud-metadata endpoint.
+        return Promise.resolve(fakeResponse({ status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } }))
+      }
+      if (u.startsWith('https://www.youtube.com/api/timedtext')) {
+        return Promise.resolve(fakeResponse({ status: 200, body: vtt, headers: { 'content-type': 'text/vtt' } }))
+      }
+      return Promise.resolve(fakeResponse({ status: 200, body: watchHtml, headers: { 'content-type': 'text/html' } }))
+    })
+    const provider = makeProvider(store)
+    // The oembed stage is skipped by the guard; the pipeline degrades to the
+    // description/timedtext stages — and the private URL is never requested.
+    const result = await provider.fetch({ url: WATCH })
+    expect(result.body.kind).toBe('text')
+    const requested = fetchMock.mock.calls.map((call) => String(call[0]))
+    expect(requested.some((url) => url.includes('169.254.169.254'))).toBe(false)
+    await store.close()
+  })
+
   it('serves the watch page as plain HTML when the video feature is disabled', async () => {
     const store = makeStore()
     routeWatch()

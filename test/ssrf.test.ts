@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { checkSsrf } from '../src/fetch/ssrf.ts'
 
 // Mock node:dns/promises so domain tests control the resolved addresses.
@@ -156,5 +156,115 @@ describe('checkSsrf — allowPrivate bypass', () => {
   it('allows any URL when allowPrivate is true', async () => {
     const result = await checkSsrf('http://127.0.0.1/admin', { allowPrivate: true })
     expect(result.allowed).toBe(true)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* fetchPublic — the SSRF guard enforced on every redirect hop (6.3)  */
+/* ------------------------------------------------------------------ */
+
+import { fetchPublic, SsrfBlockedError, SSRF_MAX_REDIRECTS } from '../src/fetch/ssrf.ts'
+
+/** Minimal Response stand-in (status + headers + a cancellable body). */
+function fakeRedirectResponse(status: number, location?: string): Response {
+  const headers = new Headers(location !== undefined ? { location } : {})
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close()
+    },
+  })
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    statusText: String(status),
+    headers,
+    body: stream,
+    url: '',
+  } as unknown as Response
+}
+
+describe('fetchPublic — redirect handling (6.3 security review)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  // The redirect targets below must pass the guard's DNS check.
+  beforeEach(() => {
+    mockLookup.mockImplementation(async () => {
+      const records = [{ address: '93.184.215.14', family: 4 }, { address: '203.0.113.7', family: 4 }]
+      return records as unknown as Awaited<ReturnType<typeof lookup>>
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('follows a public redirect hop and returns the final response', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/start')) return fakeRedirectResponse(302, '/final')
+      return { status: 200, ok: true, statusText: 'OK', headers: new Headers(), body: null, url: '' } as unknown as Response
+    })
+    const response = await fetchPublic('https://example.com/start')
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[1]![0])).toBe('https://example.com/final')
+    // The request used manual redirects so the guard sees every hop.
+    expect(fetchMock.mock.calls[0]![1]!).toMatchObject({ redirect: 'manual' })
+  })
+
+  it('blocks a redirect that lands on a private address (metadata SSRF)', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/start')) return fakeRedirectResponse(302, 'http://169.254.169.254/latest/meta-data/')
+      throw new Error('must not fetch the private target')
+    })
+    await expect(fetchPublic('https://example.com/start')).rejects.toBeInstanceOf(SsrfBlockedError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks a redirect to a domain that resolves to a private IP (rebinding hop)', async () => {
+    mockLookup.mockImplementation(async (host: string) => {
+      if (host === 'evil.example') {
+        return [{ address: '10.0.0.5', family: 4 }] as unknown as Awaited<ReturnType<typeof lookup>>
+      }
+      const records = [{ address: '93.184.215.14', family: 4 }]
+      return records as unknown as Awaited<ReturnType<typeof lookup>>
+    })
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/start')) return fakeRedirectResponse(302, 'http://evil.example/steal')
+      throw new Error('must not fetch the rebinding target')
+    })
+    await expect(fetchPublic('https://example.com/start')).rejects.toBeInstanceOf(SsrfBlockedError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a redirect to a non-http(s) protocol', async () => {
+    fetchMock.mockResolvedValue(fakeRedirectResponse(302, 'ftp://example.com/file'))
+    await expect(fetchPublic('https://example.com/start')).rejects.toThrow(/unsupported protocol/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a redirect without a Location header', async () => {
+    fetchMock.mockResolvedValue(fakeRedirectResponse(301))
+    await expect(fetchPublic('https://example.com/start')).rejects.toThrow(/without a Location header/)
+  })
+
+  it('stops after the redirect cap', async () => {
+    fetchMock.mockImplementation(async () => fakeRedirectResponse(302, '/loop'))
+    await expect(fetchPublic('https://example.com/start', { maxRedirects: 2 })).rejects.toThrow(/maximum of 2 redirects/)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    await expect(fetchPublic('https://example.com/start').catch((error: unknown) => error)).resolves.toMatchObject(
+      { message: `exceeded the maximum of ${SSRF_MAX_REDIRECTS} redirects` },
+    )
+  })
+
+  it('bypasses the guard entirely with allowPrivate', async () => {
+    fetchMock.mockResolvedValue({ status: 200, ok: true, statusText: 'OK', headers: new Headers(), body: null, url: '' } as unknown as Response)
+    const response = await fetchPublic('http://127.0.0.1:9/', { allowPrivate: true })
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

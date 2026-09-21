@@ -27,7 +27,7 @@ import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, val
 import { buildVideoDocument, extractMetaDescription, parseOEmbed, parseVideoUrl, vttToTranscript, type OEmbedJson } from './video.ts'
 import { fetchGitHubDocument, parseGitHubUrl } from './github.ts'
 import { normalizeUrl } from './url.ts'
-import { checkSsrf } from './ssrf.ts'
+import { checkSsrf, fetchPublic, SsrfBlockedError } from './ssrf.ts'
 
 /** Resolved provider limits and cache settings. */
 export interface CachedFetchLimits {
@@ -365,18 +365,26 @@ export class CachedHttpFetchProvider {
     }
   }
 
-  /** A guarded sub-request for the video stages (SSRF-checked, UA header, non-2xx rejects). */
+  /**
+   * A guarded sub-request for the video stages (SSRF-checked on the initial
+   * URL AND on every redirect hop via fetchPublic — a redirect from the
+   * video host to a private address must not be followed; 6.3), UA header,
+   * non-2xx rejects.
+   */
   private async videoSubFetch(url: string, signal: AbortSignal): Promise<Response> {
-    const check = await checkSsrf(url, { allowPrivate: this.limits.allowPrivateNetworks })
-    if (!check.allowed) {
-      throw new CoreError(`request to ${new URL(url).host} blocked by the SSRF guard: ${check.reason}`, 'WEB_SSRF_BLOCKED')
+    let response: Response
+    try {
+      response = await fetchPublic(url, {
+        allowPrivate: this.limits.allowPrivateNetworks,
+        headers: { 'user-agent': this.limits.userAgent, accept: 'application/json, text/vtt, text/plain, */*' },
+        signal,
+      })
+    } catch (error: unknown) {
+      if (error instanceof SsrfBlockedError) {
+        throw new CoreError(`request to ${new URL(error.url).host} blocked by the SSRF guard: ${error.reason}`, 'WEB_SSRF_BLOCKED', { cause: error })
+      }
+      throw error
     }
-    const response = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      headers: { 'user-agent': this.limits.userAgent, accept: 'application/json, text/vtt, text/plain, */*' },
-      signal,
-    })
     if (response.status < 200 || response.status >= 300) {
       await response.body?.cancel()
       throw new CoreError(`video sub-request returned HTTP ${response.status}`, 'WEB_HTTP_ERROR')

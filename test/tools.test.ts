@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildCoreTools, type ToolHost } from '../src/tools/index.ts'
+import { buildCoreTools, buildCuratorTool, type ToolHost } from '../src/tools/index.ts'
 import { WebStore } from '../src/store/index.ts'
 import { resolveCoreConfig } from '../src/config.ts'
 import { CoreError } from '../src/errors.ts'
@@ -302,5 +302,38 @@ describe('buildCoreTools', () => {
     expect(cleared.text).toContain('Cleared 1 page records')
     const empty = await specs.get('web_history')!.execute({}, noop)
     expect(empty.text).toBe('No matching history entries.')
+  })
+})
+
+function curatorHost(remote: boolean): { host: ToolHost; store: WebStore } {
+  const built = makeHost()
+  const config = resolveCoreConfig({
+    platforms: { enabled: false },
+    extended: { curator: { enabled: true, remote } },
+  }, '/tmp')
+  ;(built.host as { config: unknown }).config = config
+  return built
+}
+
+describe('web_curator remote warning (6.3)', () => {
+  it('notes the deferred remote/TLS limitation when curator.remote is set', async () => {
+    const { host, store } = curatorHost(true)
+    void store
+    const tool = buildCuratorTool(host)
+    const out = (await tool.execute({ action: 'start' }, { signal: AbortSignal.timeout(10_000) })) as { text: string }
+    expect(out.text).toContain('Curator started at')
+    expect(out.text).toContain('remote curator access is configured but deferred')
+    expect(out.text).toContain('no TLS')
+    const status = (await tool.execute({ action: 'stop' }, { signal: AbortSignal.timeout(10_000) })) as { text: string }
+    expect(status.text).toContain('stopped')
+  })
+
+  it('omits the note when remote is not configured', async () => {
+    const { host } = curatorHost(false)
+    const tool = buildCuratorTool(host)
+    const out = (await tool.execute({ action: 'start' }, { signal: AbortSignal.timeout(10_000) })) as { text: string }
+    expect(out.text).toContain('Curator started at')
+    expect(out.text).not.toContain('remote curator access')
+    await tool.execute({ action: 'stop' }, { signal: AbortSignal.timeout(10_000) })
   })
 })
