@@ -109,8 +109,8 @@ Adapter: [`@agents-web-search/pi`](https://github.com/stelmakhdigital/agents-web
 (it clones into its install dir and runs `npm install` itself):
 
 ```sh
-pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.2.0   # user scope
-pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.2.0  # project scope
+pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.3.0   # user scope
+pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.3.0  # project scope
 pi list                                    # verify
 # update: pi update (for a pinned ref — fetch origin <ref>)
 ```
