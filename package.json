@@ -1,6 +1,6 @@
 {
   "name": "@agents-web-search/core",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Agent-agnostic web-search core: 14 search engines (keyless SERP, API, and provider-native), a SQLite-cached SSRF-guarded fetch, platform search, the web store (history/cache), and model-facing tools. Hosts integrate through the HostAdapter contract (DSH and Pi adapters live in the @agents-web-search workspace).",
   "keywords": [
     "web-search",
@@ -16,7 +16,10 @@
   "type": "module",
   "main": "lib/index.js",
   "exports": {
-    ".": "./lib/index.js",
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -30,7 +33,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
