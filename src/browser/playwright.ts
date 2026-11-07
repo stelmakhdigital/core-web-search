@@ -130,6 +130,12 @@ interface RawSnapshotElement {
  * numbering stays contiguous across the whole page.
  */
 function collectFrameElements(params: { selector: string; start: number }): { elements: RawSnapshotElement[]; text: string } {
+  // Drop `data-aws-ref` attributes left by earlier snapshots: refs are
+  // re-numbered per snapshot, and a stale attribute would make a click-by-ref
+  // land on the wrong element.
+  for (const stale of Array.from(document.querySelectorAll('[data-aws-ref]'))) {
+    stale.removeAttribute('data-aws-ref')
+  }
   const helpers = {
     /** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
     roleFromTag(tag: string, el: Element): string {
@@ -234,11 +240,18 @@ export class PlaywrightProvider implements CoreBrowserProvider {
     }
     const storageState = this.resolveStorageState(options.authProfile)
     const browser = await pw.chromium.launch({ headless: options.headless ?? this.headless })
-    const contextOptions: { storageState?: string } = {}
-    if (storageState !== undefined) contextOptions.storageState = storageState
-    const context = await browser.newContext(contextOptions)
-    const page = await context.newPage()
-    return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements, this.allowPrivateNetworks)
+    // A failure below (e.g. an unreadable storageState) must not leak the
+    // just-launched Chromium process.
+    try {
+      const contextOptions: { storageState?: string } = {}
+      if (storageState !== undefined) contextOptions.storageState = storageState
+      const context = await browser.newContext(contextOptions)
+      const page = await context.newPage()
+      return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements, this.allowPrivateNetworks)
+    } catch (error: unknown) {
+      await browser.close().catch(() => {})
+      throw error
+    }
   }
 
   private resolveStorageState(profileName: string | undefined): string | undefined {
@@ -316,6 +329,7 @@ class PlaywrightSession implements BrowserSession {
         continue // Frame detached or inaccessible mid-snapshot.
       }
     }
+    this.frameRefs.clear()
     const elements: BrowserElement[] = raw.slice(0, maxElements).map(({ el, frame }, i) => {
       const ref = `@e${i + 1}`
       this.frameRefs.set(ref, frame)

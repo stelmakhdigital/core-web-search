@@ -58,3 +58,10 @@ describe('htmlToMarkdown', () => {
     expect(typeof htmlToMarkdown('')).toBe('string')
   })
 })
+
+describe('inline content in block position (refactor regression)', () => {
+  it('keeps inline elements that hang directly off block containers', () => {
+    expect(htmlToMarkdown('<div>see <a href="https://x.com">this</a> now</div>')).toContain('[this](https://x.com)')
+    expect(htmlToMarkdown('text <b>bold</b> tail')).toContain('bold')
+  })
+})

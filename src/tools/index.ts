@@ -154,17 +154,27 @@ export function buildSearchTool(host: ToolHost): ToolSpec {
       const searchIds: number[] = []
       let anyTruncated = false
       let fromCache = false
-      for (const query of queries) {
-        const result = await host.search(
-          {
-            query: String(query),
-            maxResults,
-            ...(recency !== undefined ? { recency } : {}),
-            ...(domains !== undefined ? { domains } : {}),
-            ...(engine !== undefined ? { engine } : {}),
-          },
-          signal,
-        )
+      // All queries run in parallel (each goes through the engine rate
+      // limiter); results are merged in query order, so the dedupe and
+      // ranking semantics match the former sequential loop.
+      const settled = await Promise.allSettled(
+        queries.map((query) =>
+          host.search(
+            {
+              query: String(query),
+              maxResults,
+              ...(recency !== undefined ? { recency } : {}),
+              ...(domains !== undefined ? { domains } : {}),
+              ...(engine !== undefined ? { engine } : {}),
+            },
+            signal,
+          ),
+        ),
+      )
+      for (const outcome of settled) {
+        if (outcome.status === 'rejected') throw outcome.reason
+      }
+      for (const result of settled.map((outcome) => (outcome as PromiseFulfilledResult<Awaited<ReturnType<typeof host.search>>>).value)) {
         if (result.fromCache) fromCache = true
         if (result.searchId !== undefined) searchIds.push(result.searchId)
         if (result.truncated) anyTruncated = true
@@ -515,17 +525,15 @@ export function buildHistoryTool(host: ToolHost): ToolSpec {
       const limit = Math.min(Math.max(Math.trunc((record['limit'] as number | undefined) ?? 20), 1), 100)
       const lines: string[] = []
       if (kind === 'search' || kind === 'all') {
-        const searches = await host.store.recentSearches(limit)
+        const searches = await host.store.recentSearches(limit, filter.length > 0 ? filter : undefined)
         for (const row of searches) {
-          if (filter.length > 0 && !row.query.toLowerCase().includes(filter)) continue
           const sources = row.sources as readonly { url?: unknown }[]
           lines.push(`[${new Date(row.createdAt).toISOString()}] search: ${row.query} → ${sources.length} sources (engines: ${row.engines.join(',')})`)
         }
       }
       if (kind === 'fetch' || kind === 'all') {
-        const pages = await host.store.recentPages(limit)
+        const pages = await host.store.recentPages(limit, filter.length > 0 ? filter : undefined)
         for (const row of pages) {
-          if (filter.length > 0 && !row.url.toLowerCase().includes(filter)) continue
           lines.push(`[${new Date(row.fetchedAt).toISOString()}] fetch: ${row.url} → HTTP ${row.statusCode} (${row.bodyKind}, ${row.body.length} chars${row.truncated ? ', truncated' : ''})`)
         }
       }
