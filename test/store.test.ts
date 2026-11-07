@@ -316,3 +316,23 @@ describe('WebStore — schema migration', () => {
     }
   })
 })
+
+describe('recentSearches/recentPages SQL-side filter (refactor regression)', () => {
+  it('returns limit rows that match deeper in history, not just the newest window', async () => {
+    const store = new WebStore({ path: ':memory:' })
+    for (let i = 0; i < 25; i++) {
+      await store.recordSearch({ cacheKey: `k${i}`, query: i === 20 ? 'needle in the middle' : `noise ${i}`, engines: ['ddg'], createdAt: Date.now() - i * 1000, sources: [], truncated: false })
+    }
+    const hits = await store.recentSearches(5, 'needle')
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.query).toBe('needle in the middle')
+    // Literal % and _ are matched literally, not as LIKE wildcards.
+    await store.recordSearch({ cacheKey: 'pct', query: '50% off', engines: ['ddg'], createdAt: Date.now(), sources: [], truncated: false })
+    await store.recordSearch({ cacheKey: 'us', query: 'a_b vs axb', engines: ['ddg'], createdAt: Date.now(), sources: [], truncated: false })
+    expect(await store.recentSearches(5, '50%')).toHaveLength(1)
+    // '_' must not act as a single-char wildcard (axb would match 'a_b' otherwise)
+    expect(await store.recentSearches(5, 'a_b')).toHaveLength(1)
+    expect((await store.recentSearches(5, 'a_b'))[0]?.query).toBe('a_b vs axb')
+    await store.close()
+  })
+})

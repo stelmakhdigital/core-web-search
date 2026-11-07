@@ -128,7 +128,11 @@ export declare class WebStore {
     private db;
     private opening;
     private closed;
+    /** Prepared-statement cache: node:sqlite compiles SQL on every prepare(). */
+    private readonly statements;
     constructor(options: WebStoreOptions);
+    /** One prepared statement, compiled once per SQL string per store instance. */
+    private stmt;
     /** Open the database (idempotent) and return the handle. */
     private ensureOpen;
     private open;
@@ -156,8 +160,9 @@ export declare class WebStore {
      * not a concern.
      */
     readSearch(cacheKey: string): Promise<StoredSearch | undefined>;
-    /** Recent search history, newest first. */
-    recentSearches(limit: number): Promise<StoredSearch[]>;
+    /** Recent search history, newest first. When `queryFilter` is set, only
+     * rows whose query contains it (case-insensitive) count toward `limit`. */
+    recentSearches(limit: number, queryFilter?: string): Promise<StoredSearch[]>;
     /** Delete all search records. Returns the number of rows deleted. */
     clearSearches(): Promise<number>;
     /** Delete one search record by id (curator discard). Returns true when a row was deleted. */
@@ -171,7 +176,9 @@ export declare class WebStore {
     /** Read one page record by normalized URL (and mark it accessed for LRU). */
     readPage(normalizedUrl: string): Promise<StoredPage | undefined>;
     /** Recent page history, newest first. */
-    recentPages(limit: number): Promise<StoredPage[]>;
+    /** Recent page history, newest first. When `urlFilter` is set, only rows
+     * whose URL contains it (case-insensitive) count toward `limit`. */
+    recentPages(limit: number, urlFilter?: string): Promise<StoredPage[]>;
     /** Refresh a page's freshness metadata after a 304 revalidation. */
     refreshPage(normalizedUrl: string, fetchedAt: number, etag?: string, lastModified?: string): Promise<void>;
     /** Delete all page records. Returns the number of rows deleted. */

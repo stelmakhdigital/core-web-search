@@ -32,12 +32,13 @@ const MAIN_SELECTORS = [
 ] as const
 
 /** Elements that never contribute to readable content. */
-const STRIPPED_TAGS = new Set([
+const STRIPPED_TAGS_LIST = [
   'script', 'style', 'noscript', 'template', 'svg', 'canvas', 'iframe',
   'object', 'embed', 'video', 'audio', 'source', 'track', 'map', 'link',
   'meta', 'form', 'button', 'input', 'select', 'textarea', 'nav', 'aside',
   'footer', 'header', 'figure', 'figcaption', 'dialog', 'menu', 'datalist',
-])
+]
+const STRIPPED_TAGS = new Set(STRIPPED_TAGS_LIST)
 
 /**
  * Convert an HTML document to readable Markdown.
@@ -46,7 +47,8 @@ const STRIPPED_TAGS = new Set([
 export function htmlToMarkdown(html: string): string {
   const $ = cheerio.load(html)
   $('head').remove()
-  for (const tag of STRIPPED_TAGS) $(tag).remove()
+  // One pass: every $(tag) selector scans the whole document.
+  $(STRIPPED_TAGS_LIST.join(',')).remove()
   const $root = pickMainRoot($)
   const lines: string[] = []
   walk($, $root, lines)
@@ -63,7 +65,9 @@ function pickMainRoot($: cheerio.CheerioAPI): cheerio.Cheerio<Element> {
       let best: cheerio.Cheerio<Element> | null = null
       let bestText = 0
       for (const el of matches) {
-        const text = $.root().find(el).text().length
+        // The element is already in the tree: reading its own subtree is
+        // cheaper than a global find() from the root for every match.
+        const text = $(el).text().length
         if (text > bestText) {
           bestText = text
           best = $(el)
@@ -106,33 +110,14 @@ function walkNode($: cheerio.CheerioAPI, node: AnyNode, state: WalkState, lines:
   if (STRIPPED_TAGS.has(tag)) return
 
   const $self = $(node)
-  const inline = isInlineTag(tag)
-  const parts: string[] = []
-  if (inline) {
-    // Inline elements collect their own text representation.
-    if (tag === 'a') {
-      const href = $self.attr('href') ?? ''
-      const text = plainText(node).trim()
-      if (href.length > 0 && /^https?:/i.test(href) && text.length > 0) parts.push(`[${text}](${href})`)
-      else if (text.length > 0) parts.push(text)
-      return
-    }
-    if (tag === 'code') {
-      const text = plainText(node).trim()
-      if (text.length > 0) parts.push(`\`${text}\``)
-      return
-    }
-    if (tag === 'img') {
-      const src = $self.attr('src') ?? ''
-      if (src.length > 0) parts.push(`![image](${src})`)
-      return
-    }
-    if (tag === 'br') {
-      parts.push('\n')
-      return
-    }
-    // generic inline: strong/em/span/... — recurse, keep text
-    for (const child of node.children) walkInline($, child, parts)
+  if (isInlineTag(tag)) {
+    // Inline elements render through the shared inline walker. In block
+    // position a <br> separates lines (collectInlineText uses a space); the
+    // collected representation goes into the output (it used to be dropped).
+    const parts: string[] = []
+    walkInline($, node, parts, '\n')
+    const text = parts.join('').trim()
+    if (text.length > 0) lines.push(text)
     return
   }
 
@@ -228,7 +213,7 @@ function collectInlineText($: cheerio.CheerioAPI, node: AnyNode): string {
   return parts.join('')
 }
 
-function walkInline($: cheerio.CheerioAPI, node: AnyNode, parts: string[]): void {
+function walkInline($: cheerio.CheerioAPI, node: AnyNode, parts: string[], br = ' '): void {
   if (isTextNode(node)) {
     const text = node.data
     if (text.length > 0) parts.push(collapseWhitespace(text))
@@ -256,7 +241,7 @@ function walkInline($: cheerio.CheerioAPI, node: AnyNode, parts: string[]): void
     return
   }
   if (tag === 'br') {
-    parts.push(' ')
+    parts.push(br)
     return
   }
   for (const child of node.children) walkInline($, child, parts)

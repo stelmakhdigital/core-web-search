@@ -99,6 +99,9 @@ export declare class CachedHttpFetchProvider {
     private assertPublic;
     /** Fetch from the network, cache a 2xx result, and return it. */
     private fetchFresh;
+    /** Record one fetched 2xx page in the store and the memory layer; returns
+     * the result with `pageId` when the store accepted the row. */
+    private persistPage;
     /**
      * Conditional revalidation of a TTL-expired cache entry. A 304 refreshes
      * the timestamp and serves the stale body; a 2xx reads the new body from

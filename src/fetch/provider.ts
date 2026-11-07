@@ -182,61 +182,42 @@ export class CachedHttpFetchProvider {
           body: { kind: 'text', content },
           truncated: truncatedByChars,
         }
-        const pageId = await this.limits.store.recordPage({
-          url: result.url,
-          normalizedUrl: normalizeUrl(url.toString()),
-          fetchedAt: Date.now(),
-          statusCode: 200,
-          bodyKind: 'text',
-          body: result.body.content,
-          truncated: result.truncated,
-        }).catch(() => undefined)
-        if (this.memory !== undefined) {
-          this.memory.set(normalizeUrl(url.toString()), {
-            id: pageId ?? 0,
-            url: result.url,
-            normalizedUrl: normalizeUrl(url.toString()),
-            fetchedAt: Date.now(),
-            statusCode: 200,
-            bodyKind: 'text',
-            body: result.body.content,
-            truncated: result.truncated,
-          })
-        }
-        return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
+        return await this.persistPage(result, normalizeUrl(url.toString()))
       }
     }
     const { result, etag, lastModified } = await this.followAndRead(url, signal)
     if (result.statusCode >= 200 && result.statusCode < 300) {
-      const pageId = await this.limits.store.recordPage({
-        url: result.url,
-        normalizedUrl: normalizeUrl(url.toString()),
-        fetchedAt: Date.now(),
-        ...etag !== undefined ? { etag } : {},
-        ...lastModified !== undefined ? { lastModified } : {},
-        statusCode: result.statusCode,
-        bodyKind: result.body.kind,
-        body: result.body.content,
-        truncated: result.truncated,
-      }).catch(() => undefined)
-      if (this.memory !== undefined) {
-        const normalizedUrl = normalizeUrl(url.toString())
-        this.memory.set(normalizedUrl, {
-          id: pageId ?? 0,
-          url: result.url,
-          normalizedUrl,
-          fetchedAt: Date.now(),
-          ...etag !== undefined ? { etag } : {},
-          ...lastModified !== undefined ? { lastModified } : {},
-          statusCode: result.statusCode,
-          bodyKind: result.body.kind,
-          body: result.body.content,
-          truncated: result.truncated,
-        })
-      }
-      return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
+      return await this.persistPage(result, normalizeUrl(url.toString()), etag, lastModified)
     }
     return result
+  }
+
+  /** Record one fetched 2xx page in the store and the memory layer; returns
+   * the result with `pageId` when the store accepted the row. */
+  private async persistPage(
+    result: FetchResult,
+    key: string,
+    etag?: string,
+    lastModified?: string,
+  ): Promise<FetchResult> {
+    const fetchedAt = Date.now()
+    const page = {
+      id: 0,
+      url: result.url,
+      normalizedUrl: key,
+      fetchedAt,
+      ...etag !== undefined ? { etag } : {},
+      ...lastModified !== undefined ? { lastModified } : {},
+      statusCode: result.statusCode,
+      bodyKind: result.body.kind,
+      body: result.body.content,
+      truncated: result.truncated,
+    }
+    const pageId = await this.limits.store.recordPage(page).catch(() => undefined)
+    if (this.memory !== undefined) {
+      this.memory.set(key, { ...page, id: pageId ?? 0 })
+    }
+    return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
   }
 
   /**
@@ -283,32 +264,7 @@ export class CachedHttpFetchProvider {
       const result = await this.readBody(response, url, d.signal)
       const etag = response.headers.get('etag') ?? undefined
       const lastModified = response.headers.get('last-modified') ?? undefined
-      const pageId = await this.limits.store.recordPage({
-        url: result.url,
-        normalizedUrl: key,
-        fetchedAt: Date.now(),
-        ...etag !== undefined ? { etag } : {},
-        ...lastModified !== undefined ? { lastModified } : {},
-        statusCode: result.statusCode,
-        bodyKind: result.body.kind,
-        body: result.body.content,
-        truncated: result.truncated,
-      }).catch(() => undefined)
-      if (this.memory !== undefined) {
-        this.memory.set(key, {
-          id: pageId ?? 0,
-          url: result.url,
-          normalizedUrl: key,
-          fetchedAt: Date.now(),
-          ...etag !== undefined ? { etag } : {},
-          ...lastModified !== undefined ? { lastModified } : {},
-          statusCode: result.statusCode,
-          bodyKind: result.body.kind,
-          body: result.body.content,
-          truncated: result.truncated,
-        })
-      }
-      return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
+      return await this.persistPage(result, key, etag, lastModified)
     }
     await response.body?.cancel()
     return await this.fetchFresh(url, d.signal)

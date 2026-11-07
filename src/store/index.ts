@@ -15,7 +15,7 @@
 
 import { mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { WEB_STORE_MIGRATIONS, WEB_STORE_SCHEMA, WEB_STORE_SCHEMA_VERSION } from './schema.ts'
 
 /** Store configuration. */
@@ -162,8 +162,20 @@ export class WebStore {
   private db: DatabaseSync | undefined
   private opening: Promise<DatabaseSync> | undefined
   private closed = false
+  /** Prepared-statement cache: node:sqlite compiles SQL on every prepare(). */
+  private readonly statements = new Map<string, StatementSync>()
 
   constructor(private readonly options: WebStoreOptions) {}
+
+  /** One prepared statement, compiled once per SQL string per store instance. */
+  private stmt(db: DatabaseSync, sql: string): StatementSync {
+    let statement = this.statements.get(sql)
+    if (statement === undefined) {
+      statement = db.prepare(sql)
+      this.statements.set(sql, statement)
+    }
+    return statement
+  }
 
   /** Open the database (idempotent) and return the handle. */
   private async ensureOpen(): Promise<DatabaseSync> {
@@ -205,7 +217,7 @@ export class WebStore {
    * @param db - the open database handle (web_meta already created).
    */
   private migrate(db: DatabaseSync): void {
-    const row = db.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string } | undefined
+    const row = this.stmt(db, 'SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string } | undefined
     let current: number
     if (row === undefined) {
       // No version stamp. Either a brand-new file (web_meta was just created
@@ -213,7 +225,7 @@ export class WebStore {
       // (created before the stamp existed). Probe the actual shape to tell
       // them apart: a missing web_searches table means brand-new, a table
       // without the LRU column means the oldest known version.
-      const columns = db.prepare('PRAGMA table_info(web_searches)').all() as Array<{ name: string }>
+      const columns = this.stmt(db, 'PRAGMA table_info(web_searches)').all() as Array<{ name: string }>
       if (columns.length === 0) {
         current = WEB_STORE_SCHEMA_VERSION
       } else {
@@ -225,7 +237,7 @@ export class WebStore {
     if (current >= WEB_STORE_SCHEMA_VERSION) {
       if (row === undefined) {
         // Brand-new database: stamp the version the DDL is about to create.
-        db.prepare('INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
+        this.stmt(db, 'INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
           'schema_version',
           String(WEB_STORE_SCHEMA_VERSION),
         )
@@ -237,7 +249,7 @@ export class WebStore {
       if (migration.from >= WEB_STORE_SCHEMA_VERSION) break
       db.exec(migration.up)
     }
-    db.prepare('INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
+    this.stmt(db, 'INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
       'schema_version',
       String(WEB_STORE_SCHEMA_VERSION),
     )
@@ -247,8 +259,7 @@ export class WebStore {
   async recordSearch(entry: SearchRecordInput): Promise<number> {
     const db = await this.ensureOpen()
     const now = Date.now()
-    const result = db
-      .prepare(
+    const result = this.stmt(db, 
         `INSERT INTO web_searches (cache_key, query, engines, created_at, last_accessed_at, sources, truncated, content)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(cache_key) DO UPDATE SET
@@ -284,17 +295,26 @@ export class WebStore {
    */
   async readSearch(cacheKey: string): Promise<StoredSearch | undefined> {
     const db = await this.ensureOpen()
-    const row = db.prepare('SELECT * FROM web_searches WHERE cache_key = ?').get(cacheKey) as SearchRow | undefined
+    const row = this.stmt(db, 'SELECT * FROM web_searches WHERE cache_key = ?').get(cacheKey) as SearchRow | undefined
     if (row === undefined) return undefined
-    db.prepare('UPDATE web_searches SET last_accessed_at = ? WHERE id = ?').run(Date.now(), row.id)
+    this.stmt(db, 'UPDATE web_searches SET last_accessed_at = ? WHERE id = ?').run(Date.now(), row.id)
     return mapSearchRow(row)
   }
 
-  /** Recent search history, newest first. */
-  async recentSearches(limit: number): Promise<StoredSearch[]> {
+  /** Recent search history, newest first. When `queryFilter` is set, only
+   * rows whose query contains it (case-insensitive) count toward `limit`. */
+  async recentSearches(limit: number, queryFilter?: string): Promise<StoredSearch[]> {
     const db = await this.ensureOpen()
-    const rows = db
-      .prepare('SELECT * FROM web_searches ORDER BY created_at DESC, id DESC LIMIT ?')
+    if (queryFilter !== undefined && queryFilter.length > 0) {
+      // SQL-side filter: a JS-side check after a `limit` fetch would return
+      // fewer rows than match deeper in history. `%`/`_` and `\` in the
+      // user input are escaped so they match literally.
+      const pattern = `%${queryFilter.replace(/[\\%_]/g, '\\$&')}%`
+      const rows = this.stmt(db, "SELECT * FROM web_searches WHERE lower(query) LIKE ? ESCAPE '\\' ORDER BY created_at DESC, id DESC LIMIT ?")
+        .all(pattern, limit) as unknown as SearchRow[]
+      return rows.map(mapSearchRow)
+    }
+    const rows = this.stmt(db, 'SELECT * FROM web_searches ORDER BY created_at DESC, id DESC LIMIT ?')
       .all(limit) as unknown as SearchRow[]
     return rows.map(mapSearchRow)
   }
@@ -302,14 +322,14 @@ export class WebStore {
   /** Delete all search records. Returns the number of rows deleted. */
   async clearSearches(): Promise<number> {
     const db = await this.ensureOpen()
-    const result = db.prepare('DELETE FROM web_searches').run()
+    const result = this.stmt(db, 'DELETE FROM web_searches').run()
     return Number(result.changes)
   }
 
   /** Delete one search record by id (curator discard). Returns true when a row was deleted. */
   async deleteSearch(id: number): Promise<boolean> {
     const db = await this.ensureOpen()
-    const result = db.prepare('DELETE FROM web_searches WHERE id = ?').run(id)
+    const result = this.stmt(db, 'DELETE FROM web_searches WHERE id = ?').run(id)
     return Number(result.changes) > 0
   }
 
@@ -317,8 +337,7 @@ export class WebStore {
   async recordPage(entry: PageRecordInput): Promise<number> {
     const db = await this.ensureOpen()
     const now = Date.now()
-    const result = db
-      .prepare(
+    const result = this.stmt(db, 
         `INSERT INTO web_pages (url, normalized_url, fetched_at, last_accessed_at, etag, last_modified, status_code, body_kind, body, truncated)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(normalized_url) DO UPDATE SET
@@ -349,38 +368,45 @@ export class WebStore {
     if (id > 0) return id
     // ON CONFLICT DO UPDATE creates no new row (lastInsertRowid stays 0):
     // the record kept its original id.
-    const row = db.prepare('SELECT id FROM web_pages WHERE normalized_url = ?').get(entry.normalizedUrl) as { id: number } | undefined
+    const row = this.stmt(db, 'SELECT id FROM web_pages WHERE normalized_url = ?').get(entry.normalizedUrl) as { id: number } | undefined
     return row?.id ?? 0
   }
 
   /** Read one search record by id (5.5, get_search_content). */
   async getSearch(id: number): Promise<StoredSearch | undefined> {
     const db = await this.ensureOpen()
-    const row = db.prepare('SELECT * FROM web_searches WHERE id = ?').get(id) as SearchRow | undefined
+    const row = this.stmt(db, 'SELECT * FROM web_searches WHERE id = ?').get(id) as SearchRow | undefined
     return row === undefined ? undefined : mapSearchRow(row)
   }
 
   /** Read one page record by id (5.5, get_search_content). */
   async getPage(id: number): Promise<StoredPage | undefined> {
     const db = await this.ensureOpen()
-    const row = db.prepare('SELECT * FROM web_pages WHERE id = ?').get(id) as PageRow | undefined
+    const row = this.stmt(db, 'SELECT * FROM web_pages WHERE id = ?').get(id) as PageRow | undefined
     return row === undefined ? undefined : mapPageRow(row)
   }
 
   /** Read one page record by normalized URL (and mark it accessed for LRU). */
   async readPage(normalizedUrl: string): Promise<StoredPage | undefined> {
     const db = await this.ensureOpen()
-    const row = db.prepare('SELECT * FROM web_pages WHERE normalized_url = ?').get(normalizedUrl) as PageRow | undefined
+    const row = this.stmt(db, 'SELECT * FROM web_pages WHERE normalized_url = ?').get(normalizedUrl) as PageRow | undefined
     if (row === undefined) return undefined
-    db.prepare('UPDATE web_pages SET last_accessed_at = ? WHERE id = ?').run(Date.now(), row.id)
+    this.stmt(db, 'UPDATE web_pages SET last_accessed_at = ? WHERE id = ?').run(Date.now(), row.id)
     return mapPageRow(row)
   }
 
   /** Recent page history, newest first. */
-  async recentPages(limit: number): Promise<StoredPage[]> {
+  /** Recent page history, newest first. When `urlFilter` is set, only rows
+   * whose URL contains it (case-insensitive) count toward `limit`. */
+  async recentPages(limit: number, urlFilter?: string): Promise<StoredPage[]> {
     const db = await this.ensureOpen()
-    const rows = db
-      .prepare('SELECT * FROM web_pages ORDER BY fetched_at DESC, id DESC LIMIT ?')
+    if (urlFilter !== undefined && urlFilter.length > 0) {
+      const pattern = `%${urlFilter.replace(/[\\%_]/g, '\\$&')}%`
+      const rows = this.stmt(db, "SELECT * FROM web_pages WHERE lower(url) LIKE ? ESCAPE '\\' ORDER BY fetched_at DESC, id DESC LIMIT ?")
+        .all(pattern, limit) as unknown as PageRow[]
+      return rows.map(mapPageRow)
+    }
+    const rows = this.stmt(db, 'SELECT * FROM web_pages ORDER BY fetched_at DESC, id DESC LIMIT ?')
       .all(limit) as unknown as PageRow[]
     return rows.map(mapPageRow)
   }
@@ -388,7 +414,7 @@ export class WebStore {
   /** Refresh a page's freshness metadata after a 304 revalidation. */
   async refreshPage(normalizedUrl: string, fetchedAt: number, etag?: string, lastModified?: string): Promise<void> {
     const db = await this.ensureOpen()
-    db.prepare(
+    this.stmt(db, 
       'UPDATE web_pages SET fetched_at = ?, etag = COALESCE(?, etag), last_modified = COALESCE(?, last_modified) WHERE normalized_url = ?',
     ).run(fetchedAt, etag ?? null, lastModified ?? null, normalizedUrl)
   }
@@ -396,23 +422,22 @@ export class WebStore {
   /** Delete all page records. Returns the number of rows deleted. */
   async clearPages(): Promise<number> {
     const db = await this.ensureOpen()
-    const result = db.prepare('DELETE FROM web_pages').run()
+    const result = this.stmt(db, 'DELETE FROM web_pages').run()
     return Number(result.changes)
   }
 
   /** Delete one page record by id (curator discard). Returns true when a row was deleted. */
   async deletePage(id: number): Promise<boolean> {
     const db = await this.ensureOpen()
-    const result = db.prepare('DELETE FROM web_pages WHERE id = ?').run(id)
+    const result = this.stmt(db, 'DELETE FROM web_pages WHERE id = ?').run(id)
     return Number(result.changes) > 0
   }
 
   /** Store statistics. */
   async stats(): Promise<WebStoreStats> {
     const db = await this.ensureOpen()
-    const searchesRow = db.prepare('SELECT COUNT(*) AS n, MAX(created_at) AS last FROM web_searches').get() as { n: number; last: number | null }
-    const pagesRow = db
-      .prepare('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(body)), 0) AS bytes, MAX(fetched_at) AS last FROM web_pages')
+    const searchesRow = this.stmt(db, 'SELECT COUNT(*) AS n, MAX(created_at) AS last FROM web_searches').get() as { n: number; last: number | null }
+    const pagesRow = this.stmt(db, 'SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(body)), 0) AS bytes, MAX(fetched_at) AS last FROM web_pages')
       .get() as { n: number; bytes: number; last: number | null }
     return {
       searches: searchesRow.n,
@@ -436,8 +461,7 @@ export class WebStore {
     let searches = 0
     let pages = 0
     if (limits.maxSearches !== undefined) {
-      const result = db
-        .prepare(
+      const result = this.stmt(db, 
           `DELETE FROM web_searches WHERE id NOT IN (
              SELECT id FROM web_searches ORDER BY last_accessed_at DESC, id DESC LIMIT ?
            )`,
@@ -446,8 +470,7 @@ export class WebStore {
       searches = Number(result.changes)
     }
     if (limits.maxPages !== undefined) {
-      const result = db
-        .prepare(
+      const result = this.stmt(db, 
           `DELETE FROM web_pages WHERE id NOT IN (
              SELECT id FROM web_pages ORDER BY last_accessed_at DESC, id DESC LIMIT ?
            )`,
