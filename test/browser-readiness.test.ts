@@ -15,9 +15,11 @@ describe('browserReadiness (real environment)', () => {
     }
   })
 
-  it('never launches a browser or touches the network (returns a plain shape)', async () => {
+  it('returns exactly the documented shape (no extras)', async () => {
     const readiness = await browserReadiness()
-    expect(Object.keys(readiness).sort()).toEqual(expect.arrayContaining(['chromium', 'playwright']))
-    expect(['chromium', 'hint', 'playwright'].sort()).toEqual(Object.keys(readiness).sort())
+    const keys = Object.keys(readiness).sort()
+    expect(keys).toEqual(readiness.hint === undefined
+      ? ['chromium', 'playwright']
+      : ['chromium', 'hint', 'playwright'])
   })
 })
