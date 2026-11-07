@@ -245,6 +245,8 @@ export interface CoreConfig {
     readonly fetch?: {
         /** Page cache TTL (ms). Default 24h. */
         readonly cacheTtlMs?: number;
+        /** In-memory page cache cap (entries, front layer over the store). Default 50; 0 disables. */
+        readonly memoryCacheMaxEntries?: number;
         /** Conditional revalidation (ETag/Last-Modified) for fresh-but-expired pages. Default true. */
         readonly revalidate?: boolean;
         /** Maximum response body (bytes). Default 5 MiB. */

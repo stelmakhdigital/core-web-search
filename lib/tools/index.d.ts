@@ -31,6 +31,8 @@ export interface ToolHost {
     }, signal?: AbortSignal): Promise<PlatformSearchResult>;
     /** Per-engine routing diagnostics (cooldowns, availability); optional. */
     readonly searchDiagnostics?: () => readonly import('../search/provider.ts').EngineDiagnostics[];
+    /** Drop the in-memory page-cache layer (the store is cleared separately); optional. */
+    readonly clearMemoryCache?: () => void;
     /** Host LLM client (optional) — powers `web_fetch` question mode (5.1). */
     readonly llm?: LlmClient;
 }

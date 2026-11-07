@@ -39,6 +39,8 @@ export interface ResolvedCoreConfig {
     };
     readonly fetch: {
         readonly cacheTtlMs: number;
+        /** In-memory page cache cap (entries, front layer over the store); 0 disables. */
+        readonly memoryCacheMaxEntries: number;
         readonly revalidate: boolean;
         readonly maxBodyBytes: number;
         readonly maxOutputChars: number;

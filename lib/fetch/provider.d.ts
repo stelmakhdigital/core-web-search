@@ -36,6 +36,8 @@ export interface CachedFetchLimits {
     userAgent: string;
     /** Time-to-live in milliseconds for cached pages. */
     cacheTtlMs: number;
+    /** In-memory page cache cap (entries); 0/undefined disables the memory layer. */
+    memoryCacheMaxEntries?: number;
     /** The shared web store (page cache). */
     store: WebStore;
     /** Issue conditional revalidation requests for fresh-but-expired entries. */
@@ -80,7 +82,10 @@ export declare const CACHED_FETCH_PROVIDER_ID = "cached-http";
 export declare class CachedHttpFetchProvider {
     private readonly limits;
     readonly id = "cached-http";
+    private readonly memory;
     constructor(limits: CachedFetchLimits);
+    /** Drop the in-memory page layer (wired into `web_cache_clear`). */
+    clearMemoryCache(): void;
     /** No credentials to check — an anonymous public fetcher is always usable. */
     available(): boolean;
     /** Fetch one URL, serving from the cache when fresh. */
