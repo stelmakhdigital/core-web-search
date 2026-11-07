@@ -41,6 +41,30 @@ export interface ToolExecuteCtx {
     readonly signal: AbortSignal;
     readonly onUpdate?: (partial: ToolOutput) => void;
 }
+/** Core tools that are safe to run in parallel sibling groups (no shared
+ * mutable state). Everything else (web_search, web_fetch, the browser
+ * family) must run exclusively. Host adapters must all use this one set —
+ * a per-adapter copy would let the parallelism policy drift between hosts. */
+export declare const CONCURRENT_TOOLS: ReadonlySet<string>;
+/** A JSON-Schema value node (the shape of the core's `ToolSpec.parameters`).
+ * Host adapters project it onto their host schema languages; unknown
+ * keywords are carried through the index signature and may be dropped by a
+ * projection (the core re-validates arguments at execution time). */
+export interface JsonSchemaNode {
+    readonly type?: string;
+    readonly description?: string;
+    readonly enum?: readonly (string | number | boolean)[];
+    readonly minimum?: number;
+    readonly maximum?: number;
+    readonly minItems?: number;
+    readonly maxItems?: number;
+    readonly items?: JsonSchemaNode;
+    readonly properties?: Readonly<Record<string, JsonSchemaNode>>;
+    readonly additionalProperties?: boolean;
+    readonly oneOf?: readonly JsonSchemaNode[];
+    readonly required?: readonly string[];
+    readonly [keyword: string]: unknown;
+}
 /** The `web_search` tool spec. */
 export declare function buildSearchTool(host: ToolHost): ToolSpec;
 /** The `web_fetch` tool spec. */
