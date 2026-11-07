@@ -5,7 +5,7 @@
  */
 
 import { CoreError } from '../../errors.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
+import { apiStatusErrors, HttpSearchClient } from '../http.ts'
 import { normalizeUrl } from '../url.ts'
 import type { SearchSource } from '../../types.ts'
 import type { EngineSearchResult, SearchEngine, SearchEngineDeps } from './types.ts'
@@ -47,11 +47,13 @@ export function braveFreshness(freshness: string): string {
 export class BraveEngine implements SearchEngine {
   readonly id = 'brave'
   private readonly options: BraveEngineOptions
+  private readonly http: HttpSearchClient
   private cachedKey = ''
 
   constructor(options: BraveEngineOptions) {
     this.options = options
     this.cachedKey = options.apiKey ?? ''
+    this.http = new HttpSearchClient({ userAgent: options.userAgent })
   }
 
   available(): boolean {
@@ -76,39 +78,18 @@ export class BraveEngine implements SearchEngine {
     const freshness = braveFreshness(this.options.freshness ?? '')
     if (freshness.length > 0) params.set('freshness', freshness)
     const url = `${base}/res/v1/web/search?${params.toString()}`
-    let response: Response
-    try {
-      response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'accept-Encoding': 'gzip',
-          'X-Subscription-Token': this.cachedKey,
-          'user-agent': this.options.userAgent,
-        },
-        signal,
-      })
-    } catch (error) {
-      throw classifyWebError(error, signal, 'Brave search request failed')
-    }
-    if (response.status === 401 || response.status === 403) {
-      await response.body?.cancel()
-      throw new CoreError(`Brave rejected the API key (HTTP ${response.status})`, 'WEB_AUTH', { cause: response })
-    }
-    if (response.status === 429) {
-      await response.body?.cancel()
-      throw new CoreError('Brave rate limit exceeded (HTTP 429)', 'WEB_QUOTA', { cause: response })
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new CoreError(`Brave search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: response })
-    }
-    let text: string
-    try {
-      text = await readCappedText(response, 1_048_576)
-    } catch (error) {
-      throw classifyWebError(error, signal, 'Brave search body read failed')
-    }
+    const text = await this.http.fetchText({
+      url,
+      headers: {
+        'accept': 'application/json',
+        'accept-Encoding': 'gzip',
+        'X-Subscription-Token': this.cachedKey,
+      },
+      signal,
+      maxBytes: 1_048_576,
+      context: 'Brave search request',
+      mapStatus: apiStatusErrors('Brave'),
+    })
     let parsed: BraveResponse
     try {
       parsed = JSON.parse(text) as BraveResponse

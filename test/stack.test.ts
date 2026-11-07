@@ -44,7 +44,7 @@ afterEach(async () => {
 
 describe('createWebStack', () => {
   it('resolves the config and composes the user-agent with host identity', () => {
-    expect(stack?.config.search.engines).toEqual(['ddg', 'bing'])
+    expect(stack?.config.search.engines).toEqual(['searxng', 'ddg', 'bing'])
     expect(stack?.config.store.path).toBe(join(stateDir, 'web.db'))
     expect(stack?.userAgent).toContain('test-host/1.2.3')
   })

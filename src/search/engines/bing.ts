@@ -7,10 +7,8 @@
 
 import { CoreError } from '../../errors.ts'
 import type { SearchSource } from '../../types.ts'
+import { dedupeSources, serpStatusErrors, HttpSearchClient } from '../http.ts'
 import { isBlockedBingSerp, parseBingSerp } from '../bingparse.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
-import { RateLimiter } from '../rate-limit.ts'
-import { normalizeUrl } from '../url.ts'
 import type { EngineSearchResult, SearchEngine } from './types.ts'
 
 /** Engine options. */
@@ -41,10 +39,10 @@ export const BING_DEFAULT_ENDPOINT = 'https://www.bing.com/search'
 /** The keyless Bing HTML search engine. */
 export class BingEngine implements SearchEngine {
   readonly id = 'bing'
-  private readonly limiter: RateLimiter
+  private readonly http: HttpSearchClient
 
   constructor(private readonly options: BingEngineOptions) {
-    this.limiter = new RateLimiter({ perSec: options.rateLimitPerSec })
+    this.http = new HttpSearchClient({ userAgent: options.userAgent, rateLimitPerSec: options.rateLimitPerSec })
   }
 
   /** Cheap local check: the endpoint must parse as an absolute URL. No network. */
@@ -89,58 +87,18 @@ export class BingEngine implements SearchEngine {
 
   /** Fetch the SERP document; block-like failures surface as `CoreError`. */
   private async fetchSerp(query: string, maxResults: number, signal: AbortSignal): Promise<string> {
-    await this.limiter.acquire(signal)
-    let response: Response
-    try {
-      response = await fetch(this.serpUrl(query, maxResults), {
-        method: 'GET',
-        redirect: 'follow',
-        headers: { 'user-agent': this.options.userAgent, 'accept': 'text/html' },
-        signal,
-      })
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'Bing search request failed')
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new CoreError(`Bing search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR')
-    }
-    try {
-      return await readCappedText(response, this.options.maxSerpBytes)
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'Bing search body read failed')
-    }
+    return this.http.fetchText({
+      url: this.serpUrl(query, maxResults),
+      headers: { accept: 'text/html' },
+      signal,
+      maxBytes: this.options.maxSerpBytes,
+      context: 'Bing search request',
+      mapStatus: serpStatusErrors('Bing'),
+    })
   }
 
   /** Drop blocked domains and duplicate URLs (first occurrence wins). */
   private filterAndDedupe(results: readonly { url: string; title: string; snippet: string }[]): SearchSource[] {
-    const seen = new Set<string>()
-    const sources: SearchSource[] = []
-    for (const result of results) {
-      const key = normalizeUrl(result.url)
-      if (seen.has(key)) continue
-      if (this.isBlockedDomain(result.url)) continue
-      seen.add(key)
-      sources.push({
-        url: result.url,
-        ...result.title.length > 0 ? { title: result.title } : {},
-        ...result.snippet.length > 0 ? { snippet: result.snippet } : {},
-      })
-    }
-    return sources
-  }
-
-  private isBlockedDomain(url: string): boolean {
-    if (this.options.blockedDomains.length === 0) return false
-    let hostname: string
-    try {
-      hostname = new URL(url).hostname.toLowerCase()
-    } catch {
-      return true
-    }
-    return this.options.blockedDomains.some((domain) => {
-      const normalized = domain.toLowerCase().replace(/^\./, '')
-      return hostname === normalized || hostname.endsWith(`.${normalized}`)
-    })
+    return dedupeSources(results, this.options.blockedDomains)
   }
 }

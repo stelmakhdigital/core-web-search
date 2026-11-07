@@ -14,7 +14,7 @@
 
 import { CoreError } from '../../errors.ts'
 import type { SearchSource } from '../../types.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
+import { apiStatusErrors, HttpSearchClient } from '../http.ts'
 import type { EngineSearchResult, SearchEngine, SearchEngineDeps } from './types.ts'
 
 /** Engine options. */
@@ -41,8 +41,11 @@ interface JinaSearchItem {
 /** The Jina API search engine. */
 export class JinaEngine implements SearchEngine {
   readonly id = 'jina'
+  private readonly http: HttpSearchClient
 
-  constructor(private readonly options: JinaEngineOptions) {}
+  constructor(private readonly options: JinaEngineOptions) {
+    this.http = new HttpSearchClient({ userAgent: options.userAgent })
+  }
 
   /** Available when a key is present (static, or a resolver that may yield one). */
   available(): boolean {
@@ -61,40 +64,18 @@ export class JinaEngine implements SearchEngine {
       throw new CoreError('the jina engine is enabled, but no API key is available (config, credentials, or JINA_API_KEY)', 'WEB_AUTH')
     }
     const url = `${(this.options.baseURL ?? JINA_DEFAULT_BASE_URL).replace(/\/$/, '')}/${encodeURIComponent(query)}`
-    let response: Response
-    try {
-      response = await fetch(url, {
-        method: 'GET',
-        redirect: 'follow',
-        headers: {
-          'user-agent': this.options.userAgent,
-          'authorization': `Bearer ${apiKey}`,
-          'accept': 'application/json',
-          'x-retain-images': 'false',
-        },
-        signal,
-      })
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'Jina search request failed')
-    }
-    if (response.status === 401 || response.status === 403) {
-      await response.body?.cancel()
-      throw new CoreError(`Jina rejected the API key (HTTP ${response.status})`, 'WEB_AUTH', { cause: response })
-    }
-    if (response.status === 402 || response.status === 429) {
-      await response.body?.cancel()
-      throw new CoreError(`Jina quota/rate limit exceeded (HTTP ${response.status})`, 'WEB_QUOTA', { cause: response })
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new CoreError(`Jina search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: response })
-    }
-    let body: string
-    try {
-      body = await readCappedText(response, this.options.maxResponseBytes)
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'Jina search body read failed')
-    }
+    const body = await this.http.fetchText({
+      url,
+      headers: {
+        'authorization': `Bearer ${apiKey}`,
+        'accept': 'application/json',
+        'x-retain-images': 'false',
+      },
+      signal,
+      maxBytes: this.options.maxResponseBytes,
+      context: 'Jina search request',
+      mapStatus: apiStatusErrors('Jina', [402]),
+    })
     let parsed: { data?: JinaSearchItem[] }
     try {
       parsed = JSON.parse(body) as { data?: JinaSearchItem[] }

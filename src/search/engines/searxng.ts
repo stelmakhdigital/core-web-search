@@ -8,14 +8,16 @@
  * [html, json]` in `settings.yml`). The engine queries
  * `{endpoint}/search?q=...&format=json` and maps the results to
  * `SearchSource`.
- * @module dsh-web-automation/search/engines/searxng
+ *
+ * Fast fail: a closed port fails on its own (ECONNREFUSED surfaces
+ * immediately — the engine adds no retry or wait); for hosts that silently
+ * drop connects the request carries a short connect-phase guard
+ * (`connectTimeoutMs`) on top of the caller's deadline.
+ * @module @agents-web-search/core/search/engines/searxng
  */
 
 import { CoreError } from '../../errors.ts'
-import type { SearchSource } from '../../types.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
-import { RateLimiter } from '../rate-limit.ts'
-import { normalizeUrl } from '../url.ts'
+import { dedupeSources, serpStatusErrors, HttpSearchClient } from '../http.ts'
 import type { EngineSearchResult, SearchEngine } from './types.ts'
 
 /** Engine options. */
@@ -30,10 +32,18 @@ export interface SearXNGEngineOptions {
   maxSerpBytes: number
   /** Domains (suffix match) excluded from results. */
   blockedDomains: readonly string[]
+  /**
+   * Connect-phase fast-fail guard (ms): abort the request when the response
+   * headers have not arrived within this budget. Default 3s; 0 disables.
+   */
+  connectTimeoutMs?: number
 }
 
 /** Default SearXNG endpoint (local instance). */
 export const SEARXNG_DEFAULT_ENDPOINT = 'http://localhost:8080'
+
+/** Default connect-phase fast-fail guard (ms). */
+export const SEARXNG_CONNECT_TIMEOUT_MS = 3_000
 
 /** One raw SearXNG JSON result. */
 interface SearXNGResult {
@@ -47,10 +57,10 @@ interface SearXNGResult {
 /** The self-hosted SearXNG metasearch engine. */
 export class SearXNGEngine implements SearchEngine {
   readonly id = 'searxng'
-  private readonly limiter: RateLimiter
+  private readonly http: HttpSearchClient
 
   constructor(private readonly options: SearXNGEngineOptions) {
-    this.limiter = new RateLimiter({ perSec: options.rateLimitPerSec })
+    this.http = new HttpSearchClient({ userAgent: options.userAgent, rateLimitPerSec: options.rateLimitPerSec })
   }
 
   /** Cheap local check: the endpoint must parse as an absolute URL. No network. */
@@ -76,34 +86,17 @@ export class SearXNGEngine implements SearchEngine {
 
   /** Fetch and parse one SearXNG JSON response. */
   private async fetchJson(query: string, signal: AbortSignal): Promise<{ results?: SearXNGResult[] }> {
-    await this.limiter.acquire(signal)
-    let response: Response
-    try {
-      response = await fetch(this.searchUrl(query), {
-        method: 'GET',
-        redirect: 'follow',
-        headers: { 'user-agent': this.options.userAgent, 'accept': 'application/json' },
-        signal,
-      })
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'SearXNG search request failed')
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      if (response.status === 403 || response.status === 429 || response.status === 503) {
-        throw new CoreError(
-          `SearXNG blocked the search request (HTTP ${response.status}); slow down or try again later`,
-          'WEB_PROVIDER_ERROR',
-        )
-      }
-      throw new CoreError(`SearXNG search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR')
-    }
-    let text: string
-    try {
-      text = await readCappedText(response, this.options.maxSerpBytes)
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'SearXNG search body read failed')
-    }
+    const text = await this.http.fetchText({
+      url: this.searchUrl(query),
+      headers: { accept: 'application/json' },
+      signal,
+      maxBytes: this.options.maxSerpBytes,
+      context: 'SearXNG search request',
+      connectTimeoutMs: (this.options.connectTimeoutMs ?? SEARXNG_CONNECT_TIMEOUT_MS) > 0
+        ? (this.options.connectTimeoutMs ?? SEARXNG_CONNECT_TIMEOUT_MS)
+        : undefined,
+      mapStatus: serpStatusErrors('SearXNG'),
+    })
     try {
       return JSON.parse(text) as { results?: SearXNGResult[] }
     } catch {
@@ -112,35 +105,7 @@ export class SearXNGEngine implements SearchEngine {
   }
 
   /** Drop blocked domains and duplicate URLs (first occurrence wins). */
-  private filterAndDedupe(results: readonly SearXNGResult[]): SearchSource[] {
-    const seen = new Set<string>()
-    const sources: SearchSource[] = []
-    for (const result of results) {
-      if (result.url === undefined || result.url.length === 0) continue
-      const key = normalizeUrl(result.url)
-      if (seen.has(key)) continue
-      if (this.isBlockedDomain(result.url)) continue
-      seen.add(key)
-      sources.push({
-        url: result.url,
-        ...(result.title?.length ? { title: result.title } : {}),
-        ...(result.content?.length ? { snippet: result.content } : {}),
-      })
-    }
-    return sources
-  }
-
-  private isBlockedDomain(url: string): boolean {
-    if (this.options.blockedDomains.length === 0) return false
-    let hostname: string
-    try {
-      hostname = new URL(url).hostname.toLowerCase()
-    } catch {
-      return true
-    }
-    return this.options.blockedDomains.some((domain) => {
-      const normalized = domain.toLowerCase().replace(/^\./, '')
-      return hostname === normalized || hostname.endsWith(`.${normalized}`)
-    })
+  private filterAndDedupe(results: readonly SearXNGResult[]): ReturnType<typeof dedupeSources> {
+    return dedupeSources(results, this.options.blockedDomains)
   }
 }
