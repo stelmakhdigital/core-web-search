@@ -93,7 +93,9 @@ export {
   buildHistoryTool,
   buildStatsTool,
   buildCacheClearTool,
+  CONCURRENT_TOOLS,
   type ToolHost,
+  type JsonSchemaNode,
 } from './tools/index.ts'
 
 // Browser module (ADR-005 §4, Q8; opt-in via config.browser.enabled)

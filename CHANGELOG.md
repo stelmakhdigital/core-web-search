@@ -2,6 +2,18 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.3.0] — 2026-11-07
+
+### Added
+
+- `CONCURRENT_TOOLS` — единый состав инструментов, безопасных для
+  параллельного запуска (web_platform_search, get_search_content,
+  web_history, web_search_stats, web_cache_clear); адаптеры больше не
+  держат свои копии, чтобы политика параллелизма не расходилась между
+  хостами.
+- `JsonSchemaNode` — публичный тип формы `ToolSpec.parameters` для
+  проекций адаптеров (type-only импорт, без рантайм-зависимости).
+
 ## [1.2.1] — 2026-11-07
 
 ### Fixed

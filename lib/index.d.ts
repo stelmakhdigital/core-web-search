@@ -30,7 +30,7 @@ export { BUILTIN_PLATFORMS } from './platforms/builtins.ts';
 export { PlatformRegistry } from './platforms/registry.ts';
 export { validatePlatform, validateRulePack, importRulePack, exportRulePack } from './platforms/rulepacks.ts';
 export type { Platform, PlatformSearchArgs, PlatformSearchResult, PlatformSource } from './platforms/types.ts';
-export { buildCoreTools, buildSearchTool, buildFetchTool, buildGetSearchContentTool, buildPlatformSearchTool, buildHistoryTool, buildStatsTool, buildCacheClearTool, type ToolHost, } from './tools/index.ts';
+export { buildCoreTools, buildSearchTool, buildFetchTool, buildGetSearchContentTool, buildPlatformSearchTool, buildHistoryTool, buildStatsTool, buildCacheClearTool, CONCURRENT_TOOLS, type ToolHost, type JsonSchemaNode, } from './tools/index.ts';
 export { BROWSER_CODES, PlaywrightProvider, assertPublicNavigation, createBrowserManager, buildBrowserTools, browserReadiness, writeScreenshot, ANON_KEY, loadPlaywright, type BrowserManager, type BrowserManagerOptions, type BrowserSession, type BrowserSnapshot, type BrowserSnapshotOptions, type BrowserElement, type BrowserNavigateResult, type BrowserOpenOptions, type BrowserScreenshot, type BrowserScreenshotOptions, type BrowserTarget, type BrowserCode, type CoreBrowserProvider, type PlaywrightProviderConfig, type BrowserToolDeps, type BrowserReadiness, } from './browser/index.ts';
 export { htmlToMarkdown } from './markdown.ts';
 export { normalizeUrl } from './search/url.ts';
