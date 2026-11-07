@@ -178,3 +178,70 @@ describe('provider id stability', () => {
     expect(MULTI_SEARCH_PROVIDER_ID).toBe('multi')
   })
 })
+
+describe('fuse mode (parallel + RRF)', () => {
+  function fuseProvider(engineById: Map<string, ReturnType<typeof makeEngine>>, engineIds?: readonly string[]) {
+    return new MultiSearchProvider({
+      engines: engineIds ?? [...engineById.keys()],
+      mode: 'fuse',
+      defaultMaxResults: 5,
+      store: makeStore(),
+      engineById: engineById as never,
+      enrich: false,
+      enrichFetchLimit: 0,
+      enrichKeep: 0,
+      searchCacheTtlMs: 1000,
+      pageCacheTtlMs: 1000,
+      timeoutMs: 10_000,
+      cooldownBaseMs: 1000,
+      cooldownMaxMs: 4000,
+      enrichOptions: {} as never,
+    })
+  }
+
+  it('merges parallel engine results by RRF (consensus first)', async () => {
+    const a = makeEngine('a', async () => ({ sources: [{ url: 'https://one.example/', title: 'One' }, { url: 'https://two.example/' }] }))
+    const b = makeEngine('b', async () => ({ sources: [{ url: 'https://two.example/' }, { url: 'https://three.example/' }] }))
+    const provider = fuseProvider(new Map([['a', a as never], ['b', b as never]]))
+    const result = await provider.search(QUERY)
+    // Both engines ran (parallel), consensus doc ranks first.
+    expect(a.search).toHaveBeenCalledTimes(1)
+    expect(b.search).toHaveBeenCalledTimes(1)
+    expect(result.sources[0]?.url).toBe('https://two.example/')
+    expect(result.sources).toHaveLength(3)
+  })
+
+  it('one failing engine does not fail the fuse and cools it down', async () => {
+    const failing = makeEngine('failing', async () => {
+      throw new CoreError('boom', 'WEB_PROVIDER_ERROR')
+    })
+    const healthy = makeEngine('healthy')
+    const provider = fuseProvider(new Map([['failing', failing as never], ['healthy', healthy as never]]))
+    const result = await provider.search(QUERY)
+    expect(result.sources).toEqual([{ url: 'https://healthy.example/' }])
+    const diag = provider.diagnostics().find((engine) => engine.id === 'failing')
+    expect(diag?.coolingDown).toBe(true)
+    expect(diag?.consecutiveFailures).toBe(1)
+    // Next search skips the cooling engine entirely.
+    await provider.search(QUERY)
+    expect(failing.search).toHaveBeenCalledTimes(1)
+    expect(healthy.search).toHaveBeenCalledTimes(2)
+  })
+
+  it('all engines failing (or empty) throws a provider error', async () => {
+    const a = makeEngine('a', async () => ({ sources: [] }))
+    const b = makeEngine('b', async () => ({ sources: [] }))
+    const provider = fuseProvider(new Map([['a', a as never], ['b', b as never]]))
+    await expect(provider.search(QUERY)).rejects.toThrow(/all search engines failed/)
+  })
+
+  it('diagnostics list the config chain first, then extra built engines', () => {
+    const chain = makeEngine('ddg')
+    const extra = makeEngine('exa')
+    const provider = fuseProvider(new Map([['exa', extra as never], ['ddg', chain as never]]), ['ddg'])
+    const diag = provider.diagnostics()
+    expect(diag.find((engine) => engine.id === 'ddg')?.inChain).toBe(true)
+    expect(diag.find((engine) => engine.id === 'exa')?.inChain).toBe(false)
+    expect(diag.find((engine) => engine.id === 'ddg')?.available).toBe(true)
+  })
+})

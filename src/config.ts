@@ -100,10 +100,8 @@ export interface ResolvedCoreConfig {
     readonly video: { readonly enabled: boolean }
     readonly github: { readonly clone: { readonly enabled: boolean; readonly maxSizeMB: number } }
     readonly curator: { readonly enabled: boolean; readonly bind: string; readonly host: string; readonly remote: boolean }
-    readonly contentCache: { readonly maxEntries: number; readonly maxBytes: number; readonly ttlMs: number }
   }
 }
-
 function assertPositiveInt(name: string, value: number): void {
   if (!Number.isInteger(value) || value <= 0) throw new CoreError(`${name} must be a positive integer`, 'WEB_BAD_REQUEST')
 }
@@ -308,21 +306,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
       host: e.curator?.host ?? 'localhost',
       remote: e.curator?.remote ?? false,
     },
-    // Reserved (6.5): the in-memory get_search_content cache is deferred in
-  // v0.1 (content is served from the WebStore); these limits are resolved
-  // and validated but have no effect yet. Do not rely on them until the
-  // in-memory cache lands.
-  contentCache: {
-      maxEntries: e.contentCache?.maxEntries ?? 128,
-      maxBytes: e.contentCache?.maxBytes ?? 128 * 1024 * 1024,
-      ttlMs: e.contentCache?.ttlMs ?? 60 * 60 * 1000,
-    },
   }
   assertPositiveInt('extended.pdf.maxSizeMB', extended.pdf.maxSizeMB)
   assertPositiveInt('extended.pdf.maxPages', extended.pdf.maxPages)
-  assertPositiveInt('extended.contentCache.maxEntries', extended.contentCache.maxEntries)
-  assertPositiveInt('extended.contentCache.maxBytes', extended.contentCache.maxBytes)
-  assertPositiveInt('extended.contentCache.ttlMs', extended.contentCache.ttlMs)
 
   return { search, fetch, platforms, store, ssrf, browser, providers, extended }
 }

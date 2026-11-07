@@ -56,4 +56,9 @@ export class EngineCooldown {
     const remaining = state.until - (this.options.now ?? Date.now)()
     return remaining > 0 ? remaining : 0
   }
+
+  /** Consecutive failure count (drives the backoff exponent; 0 when idle). */
+  consecutive(engineId: string): number {
+    return this.states.get(engineId)?.consecutive ?? 0
+  }
 }

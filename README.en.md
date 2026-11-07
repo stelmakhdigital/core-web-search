@@ -177,7 +177,6 @@ defaults (empty config = SearXNG → ddg → bing):
 | `browser` | `enabled` (false), `headless` (true), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
 | `providers.<engine>` | `apiKey`, `baseUrl` (provider-native), `model` — see the engines table |
 | `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, deferred) |
-| `extended.contentCache` | 128 / 128 MiB / 1 h — **no-op in v0.1** (reserved, see Limits) |
 
 The `searxng` engine in the default chain is optional: when the local
 instance is not running (connection refused — an immediate failure; a

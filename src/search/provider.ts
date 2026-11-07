@@ -159,6 +159,28 @@ export class MultiSearchProvider {
     })
   }
 
+  /** Per-engine routing diagnostics (config chain first, then extra built engines). */
+  diagnostics(): readonly EngineDiagnostics[] {
+    const rows: EngineDiagnostics[] = []
+    const seen = new Set<string>()
+    const push = (id: string, inChain: boolean): void => {
+      if (seen.has(id)) return
+      seen.add(id)
+      const engine = this.options.engineById.get(id)
+      rows.push({
+        id,
+        available: engine?.available() ?? false,
+        inChain,
+        coolingDown: this.cooldown.isCoolingDown(id),
+        remainingMs: this.cooldown.remainingMs(id),
+        consecutiveFailures: this.cooldown.consecutive(id),
+      })
+    }
+    for (const id of this.options.engines) push(id, true)
+    for (const id of this.options.engineById.keys()) push(id, false)
+    return rows
+  }
+
   /** Sequential fallback: the first engine returning results wins. */
   private async fallback(ids: readonly string[], query: string, maxResults: number, signal: AbortSignal): Promise<EngineSearchResult> {
     const errors: string[] = []
@@ -208,6 +230,22 @@ export class MultiSearchProvider {
     }
     return { sources: reciprocalRankFuse(lists) }
   }
+}
+
+/** One engine's routing diagnostics (for `web_search_stats` and hosts). */
+export interface EngineDiagnostics {
+  /** Stable engine id. */
+  readonly id: string
+  /** Cheap local availability (`SearchEngine.available()`). */
+  readonly available: boolean
+  /** In the routing list (config `search.engines`). */
+  readonly inChain: boolean
+  /** Currently cooling down after failures. */
+  readonly coolingDown: boolean
+  /** Remaining cooldown (ms; 0 when idle). */
+  readonly remainingMs: number
+  /** Consecutive failures (0 after a success). */
+  readonly consecutiveFailures: number
 }
 
 /**
