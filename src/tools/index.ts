@@ -30,6 +30,8 @@ export interface ToolHost {
   platformSearch(request: { readonly platform: string; readonly query: string; readonly maxResults?: number }, signal?: AbortSignal): Promise<PlatformSearchResult>
   /** Per-engine routing diagnostics (cooldowns, availability); optional. */
   readonly searchDiagnostics?: () => readonly import('../search/provider.ts').EngineDiagnostics[]
+  /** Drop the in-memory page-cache layer (the store is cleared separately); optional. */
+  readonly clearMemoryCache?: () => void
   /** Host LLM client (optional) — powers `web_fetch` question mode (5.1). */
   readonly llm?: LlmClient
 }
@@ -582,7 +584,10 @@ export function buildCacheClearTool(host: ToolHost): ToolSpec {
       const scope = record['scope'] === 'search' || record['scope'] === 'pages' || record['scope'] === 'all' ? record['scope'] : 'all'
       const lines: string[] = []
       if (scope === 'search' || scope === 'all') lines.push(`Cleared ${await host.store.clearSearches()} search records.`)
-      if (scope === 'pages' || scope === 'all') lines.push(`Cleared ${await host.store.clearPages()} page records.`)
+      if (scope === 'pages' || scope === 'all') {
+        lines.push(`Cleared ${await host.store.clearPages()} page records.`)
+        host.clearMemoryCache?.()
+      }
       return { text: lines.join(' ') }
     }),
   }

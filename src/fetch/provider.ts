@@ -22,6 +22,7 @@ import { CoreError } from '../errors.ts'
 import type { FetchBody, FetchRequest, FetchResult } from '../types.ts'
 import { deadline, timeoutOf } from '../timeout.ts'
 import type { StoredPage, WebStore } from '../store/index.ts'
+import { MemoryPageCache } from './memory-cache.ts'
 import { extractPdfToMarkdown, type PdfLimits } from './pdf.ts'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
 import { buildVideoDocument, extractMetaDescription, parseOEmbed, parseVideoUrl, vttToTranscript, type OEmbedJson } from './video.ts'
@@ -45,6 +46,8 @@ export interface CachedFetchLimits {
   userAgent: string
   /** Time-to-live in milliseconds for cached pages. */
   cacheTtlMs: number
+  /** In-memory page cache cap (entries); 0/undefined disables the memory layer. */
+  memoryCacheMaxEntries?: number
   /** The shared web store (page cache). */
   store: WebStore
   /** Issue conditional revalidation requests for fresh-but-expired entries. */
@@ -92,7 +95,16 @@ const ACCEPT_HEADER = 'text/html,application/xhtml+xml,text/*;q=0.9,application/
 export class CachedHttpFetchProvider {
   readonly id = CACHED_FETCH_PROVIDER_ID
 
-  constructor(private readonly limits: CachedFetchLimits) {}
+  private readonly memory: MemoryPageCache | undefined
+
+  constructor(private readonly limits: CachedFetchLimits) {
+    this.memory = (limits.memoryCacheMaxEntries ?? 0) > 0 ? new MemoryPageCache(limits.memoryCacheMaxEntries!) : undefined
+  }
+
+  /** Drop the in-memory page layer (wired into `web_cache_clear`). */
+  clearMemoryCache(): void {
+    this.memory?.clear()
+  }
 
   /** No credentials to check — an anonymous public fetcher is always usable. */
   available(): boolean {
@@ -110,7 +122,10 @@ export class CachedHttpFetchProvider {
     const url = validateFetchUrl(request.url, this.limits.maxUrlLength)
     await this.assertPublic(url)
     const key = normalizeUrl(url.toString())
-    const cached = await this.limits.store.readPage(key).catch(() => undefined)
+    // Memory layer first (fresh entries only): a repeat hit skips the store
+    // round-trip; an expired memory entry falls through to the store, which
+    // may hold a fresher copy (e.g. written by another process).
+    const cached = this.memory?.get(key) ?? await this.limits.store.readPage(key).catch(() => undefined)
     if (cached !== undefined) {
       if (Date.now() - cached.fetchedAt < this.limits.cacheTtlMs) {
         // Fresh: serve from cache with no network round-trip.
@@ -176,8 +191,19 @@ export class CachedHttpFetchProvider {
           body: result.body.content,
           truncated: result.truncated,
         }).catch(() => undefined)
+        if (this.memory !== undefined) {
+          this.memory.set(normalizeUrl(url.toString()), {
+            id: pageId ?? 0,
+            url: result.url,
+            normalizedUrl: normalizeUrl(url.toString()),
+            fetchedAt: Date.now(),
+            statusCode: 200,
+            bodyKind: 'text',
+            body: result.body.content,
+            truncated: result.truncated,
+          })
+        }
         return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
-        return result
       }
     }
     const { result, etag, lastModified } = await this.followAndRead(url, signal)
@@ -193,6 +219,21 @@ export class CachedHttpFetchProvider {
         body: result.body.content,
         truncated: result.truncated,
       }).catch(() => undefined)
+      if (this.memory !== undefined) {
+        const normalizedUrl = normalizeUrl(url.toString())
+        this.memory.set(normalizedUrl, {
+          id: pageId ?? 0,
+          url: result.url,
+          normalizedUrl,
+          fetchedAt: Date.now(),
+          ...etag !== undefined ? { etag } : {},
+          ...lastModified !== undefined ? { lastModified } : {},
+          statusCode: result.statusCode,
+          bodyKind: result.body.kind,
+          body: result.body.content,
+          truncated: result.truncated,
+        })
+      }
       return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
     }
     return result
@@ -229,7 +270,9 @@ export class CachedHttpFetchProvider {
     }
     if (response.status === 304) {
       await response.body?.cancel()
-      await this.limits.store.refreshPage(key, Date.now(), cached.etag, cached.lastModified).catch(() => undefined)
+      const fetchedAt = Date.now()
+      await this.limits.store.refreshPage(key, fetchedAt, cached.etag, cached.lastModified).catch(() => undefined)
+      this.memory?.set(key, { ...cached, fetchedAt })
       return cloneResult(cachedResult(cached))
     }
     if (response.status >= 200 && response.status < 300) {
@@ -251,8 +294,21 @@ export class CachedHttpFetchProvider {
         body: result.body.content,
         truncated: result.truncated,
       }).catch(() => undefined)
+      if (this.memory !== undefined) {
+        this.memory.set(key, {
+          id: pageId ?? 0,
+          url: result.url,
+          normalizedUrl: key,
+          fetchedAt: Date.now(),
+          ...etag !== undefined ? { etag } : {},
+          ...lastModified !== undefined ? { lastModified } : {},
+          statusCode: result.statusCode,
+          bodyKind: result.body.kind,
+          body: result.body.content,
+          truncated: result.truncated,
+        })
+      }
       return pageId !== undefined && pageId > 0 ? { ...result, pageId } : result
-      return result
     }
     await response.body?.cancel()
     return await this.fetchFresh(url, d.signal)

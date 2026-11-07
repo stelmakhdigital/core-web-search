@@ -45,6 +45,8 @@ export interface ResolvedCoreConfig {
   }
   readonly fetch: {
     readonly cacheTtlMs: number
+    /** In-memory page cache cap (entries, front layer over the store); 0 disables. */
+    readonly memoryCacheMaxEntries: number
     readonly revalidate: boolean
     readonly maxBodyBytes: number
     readonly maxOutputChars: number
@@ -177,6 +179,7 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   const f = config.fetch ?? {}
   const fetch = {
     cacheTtlMs: f.cacheTtlMs ?? 24 * 60 * 60 * 1000,
+    memoryCacheMaxEntries: f.memoryCacheMaxEntries ?? 50,
     revalidate: f.revalidate ?? true,
     maxBodyBytes: f.maxBodyBytes ?? 5 * 1024 * 1024,
     maxOutputChars: f.maxOutputChars ?? 100_000,
@@ -198,6 +201,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
     },
   }
   assertPositiveInt('fetch.cacheTtlMs', fetch.cacheTtlMs)
+  if (!Number.isInteger(fetch.memoryCacheMaxEntries) || fetch.memoryCacheMaxEntries < 0) {
+    throw new CoreError('fetch.memoryCacheMaxEntries must be a non-negative integer', 'WEB_BAD_REQUEST')
+  }
   assertPositiveInt('fetch.maxBodyBytes', fetch.maxBodyBytes)
   assertPositiveInt('fetch.maxOutputChars', fetch.maxOutputChars)
   assertPositiveInt('fetch.timeoutMs', fetch.timeoutMs)

@@ -18,6 +18,7 @@ import { CACHED_FETCH_PROVIDER_ID, CachedHttpFetchProvider } from './provider.ts
 
 export { CACHED_FETCH_PROVIDER_ID, CachedHttpFetchProvider } from './provider.ts'
 export type { CachedFetchLimits } from './provider.ts'
+export { MemoryPageCache } from './memory-cache.ts'
 export { checkSsrf, SsrfBlockedError, fetchPublic, SSRF_MAX_REDIRECTS } from './ssrf.ts'
 export type { SsrfCheckResult } from './ssrf.ts'
 export { validateFetchUrl, isSameOrigin, parseCharset, decoderForCharset, classifyContentType, type FetchableKind } from './policy.ts'
@@ -40,6 +41,7 @@ export function buildFetchLimits(
     maxRedirects: config.fetch.maxRedirects,
     userAgent,
     cacheTtlMs: config.fetch.cacheTtlMs,
+    memoryCacheMaxEntries: config.fetch.memoryCacheMaxEntries,
     store,
     revalidate: config.fetch.revalidate,
     allowPrivateNetworks: config.fetch.allowPrivateNetworks,

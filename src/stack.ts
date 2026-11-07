@@ -158,6 +158,7 @@ export function createWebStack(host: HostAdapter): WebStack {
     fetch: (request, signal) => fetcher.fetch({ url: request.url }, signal),
     platformSearch: (request, signal) => platformSearchStack(request, signal),
     searchDiagnostics: () => multi.diagnostics(),
+    clearMemoryCache: () => fetcher.clearMemoryCache(),
     llm: host.llm,
   }
 

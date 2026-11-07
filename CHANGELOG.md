@@ -2,6 +2,19 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.2.0] — 2026-11-07
+
+### Added
+
+- In-memory page cache (LRU, 50 entries, TTL = `fetch.cacheTtlMs`) перед
+  SQLite-store: повторные `web_fetch`/`get_search_content` в сессии идут без
+  обращения к store; `web_cache_clear` (pages/all) чистит и его. Конфиг —
+  `fetch.memoryCacheMaxEntries` (0 — выключить).
+
+### Fixed
+
+- Убраны недостижимые `return` в `fetchFresh`/`revalidate` (мёртвый код).
+
 ## [1.1.1] — 2026-11-07
 
 Ядро поставляется с декларациями типов; публичная проверка готовности
