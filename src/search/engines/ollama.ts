@@ -7,7 +7,7 @@
  */
 
 import { CoreError } from '../../errors.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
+import { HttpSearchClient } from '../http.ts'
 import { normalizeUrl } from '../url.ts'
 import type { SearchSource } from '../../types.ts'
 import type { EngineSearchResult, SearchEngine, SearchEngineDeps } from './types.ts'
@@ -35,9 +35,11 @@ interface OllamaSearchResponse {
 export class OllamaEngine implements SearchEngine {
   readonly id = 'ollama'
   private readonly options: OllamaEngineOptions
+  private readonly http: HttpSearchClient
 
   constructor(options: OllamaEngineOptions) {
     this.options = options
+    this.http = new HttpSearchClient({ userAgent: options.userAgent })
   }
 
   private endpoint(): string {
@@ -50,34 +52,32 @@ export class OllamaEngine implements SearchEngine {
   }
 
   async search(query: string, maxResults: number, signal: AbortSignal): Promise<EngineSearchResult> {
-    let response: Response
-    try {
-      response = await fetch(`${this.endpoint()}/api/experimental/web_search`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'user-agent': this.options.userAgent },
-        body: JSON.stringify({ query, max_results: maxResults }),
-        signal,
-      })
-    } catch (error) {
-      throw new CoreError(
-        `could not reach the Ollama instance at ${this.endpoint()} (is it running with web search enabled?)`,
-        'WEB_NETWORK',
-        { cause: error },
-      )
-    }
-    if (response.status === 401) {
-      await response.body?.cancel()
-      throw new CoreError('Ollama web search requires authentication (run `ollama signin`)', 'WEB_AUTH', { cause: response })
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new CoreError(`Ollama web search failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: response })
-    }
     let text: string
     try {
-      text = await readCappedText(response, 1_048_576)
+      text = await this.http.fetchText({
+        url: `${this.endpoint()}/api/experimental/web_search`,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query, max_results: maxResults }),
+        signal,
+        maxBytes: 1_048_576,
+        context: 'Ollama search request',
+        mapStatus: (status) => {
+          if (status === 401) {
+            return new CoreError('Ollama web search requires authentication (run `ollama signin`)', 'WEB_AUTH')
+          }
+          return new CoreError(`Ollama web search failed (HTTP ${status})`, 'WEB_PROVIDER_ERROR')
+        },
+      })
     } catch (error) {
-      throw classifyWebError(error, signal, 'Ollama search body read failed')
+      if (error instanceof CoreError && error.code === 'WEB_NETWORK') {
+        throw new CoreError(
+          `could not reach the Ollama instance at ${this.endpoint()} (is it running with web search enabled?)`,
+          'WEB_NETWORK',
+          { cause: error },
+        )
+      }
+      throw error
     }
     let parsed: OllamaSearchResponse
     try {

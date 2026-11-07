@@ -10,8 +10,10 @@
 import { CoreError } from './errors.ts'
 import type { CoreConfig } from './types.ts'
 
-/** Default engine list: keyless-first privacy model (DDG + Bing). */
-export const DEFAULT_ENGINES = ['ddg', 'bing'] as const
+/** Default engine list: the local SearXNG instance first, then the keyless
+ * public chain (DDG + Bing). A dead SearXNG instance fails fast (ECONNREFUSED
+ * or the connect guard) and the router cools it down and falls through. */
+export const DEFAULT_ENGINES = ['searxng', 'ddg', 'bing'] as const
 
 /** Engines the core knows how to build (registry membership). */
 export const KNOWN_ENGINES = [

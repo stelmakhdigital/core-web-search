@@ -12,7 +12,7 @@
  */
 
 import { CoreError } from '../../errors.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
+import { apiStatusErrors, HttpSearchClient } from '../http.ts'
 import { normalizeUrl } from '../url.ts'
 import type { SearchSource } from '../../types.ts'
 import type { EngineSearchResult, SearchEngine, SearchEngineDeps } from './types.ts'
@@ -49,11 +49,13 @@ interface ExaApiResponse {
 export class ExaEngine implements SearchEngine {
   readonly id = 'exa'
   private readonly options: ExaEngineOptions
+  private readonly http: HttpSearchClient
   private cachedKey = ''
 
   constructor(options: ExaEngineOptions) {
     this.options = options
     this.cachedKey = options.apiKey ?? ''
+    this.http = new HttpSearchClient({ userAgent: options.userAgent })
   }
 
   /** Available when a key is present (static, or a resolver that may yield one). */
@@ -81,39 +83,19 @@ export class ExaEngine implements SearchEngine {
       type: this.options.searchType ?? 'auto',
       contents: { text: { highlights: { numSentences: this.options.highlightsPerResult ?? 3 } } },
     }
-    let response: Response
-    try {
-      response = await fetch(`${base}/search`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.cachedKey,
-          'user-agent': this.options.userAgent,
-        },
-        body: JSON.stringify(body),
-        signal,
-      })
-    } catch (error) {
-      throw classifyWebError(error, signal, 'Exa search request failed')
-    }
-    if (response.status === 401 || response.status === 403) {
-      await response.body?.cancel()
-      throw new CoreError(`Exa rejected the API key (HTTP ${response.status})`, 'WEB_AUTH', { cause: response })
-    }
-    if (response.status === 429) {
-      await response.body?.cancel()
-      throw new CoreError('Exa rate limit exceeded (HTTP 429)', 'WEB_QUOTA', { cause: response })
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new CoreError(`Exa search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: response })
-    }
-    let text: string
-    try {
-      text = await readCappedText(response, 1_048_576)
-    } catch (error) {
-      throw classifyWebError(error, signal, 'Exa search body read failed')
-    }
+    const text = await this.http.fetchText({
+      url: `${base}/search`,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': this.cachedKey,
+      },
+      body: JSON.stringify(body),
+      signal,
+      maxBytes: 1_048_576,
+      context: 'Exa search request',
+      mapStatus: apiStatusErrors('Exa'),
+    })
     let parsed: ExaApiResponse
     try {
       parsed = JSON.parse(text) as ExaApiResponse

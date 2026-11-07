@@ -6,8 +6,8 @@ import type { CoreConfig } from '../src/types.ts'
 describe('resolveCoreConfig', () => {
   it('empty config yields the keyless default stack', () => {
     const config = resolveCoreConfig(undefined, '/tmp/state')
-    expect(config.search.engines).toEqual(['ddg', 'bing'])
-    expect(DEFAULT_ENGINES).toEqual(['ddg', 'bing'])
+    expect(config.search.engines).toEqual(['searxng', 'ddg', 'bing'])
+    expect(DEFAULT_ENGINES).toEqual(['searxng', 'ddg', 'bing'])
     expect(config.search.mode).toBe('fallback')
     expect(config.search.timeoutMs).toBe(30_000)
     expect(config.search.cacheTtlMs).toBe(900_000)

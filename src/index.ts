@@ -18,6 +18,7 @@ export { createWebStack, type WebStack } from './stack.ts'
 
 // Config
 export { resolveCoreConfig, DEFAULT_ENGINES, KNOWN_ENGINES, type ResolvedCoreConfig, type KnownEngine } from './config.ts'
+export { SEARXNG_DEFAULT_ENDPOINT } from './search/engines/searxng.ts'
 
 // Errors
 export {

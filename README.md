@@ -16,7 +16,7 @@ import { createWebStack } from '@agents-web-search/core'
 
 const host = {
   identity: { name: 'my-agent', version: '1.0.0' },
-  config: {}, // пустой конфиг = безключевой стек (ddg + bing)
+  config: {}, // пустой конфиг = SearXNG (если поднят) + безключевые ddg + bing
   paths: { stateDir: '/home/user/.my-agent' },
   async credential() { return undefined },
   registerTools(specs) { /* зарегистрировать в механизме хоста */ return () => {} },
@@ -40,7 +40,7 @@ await stack.dispose()
 | Идентификатор | Тип | Ключ | По умолчанию |
 |---|---|---|---|
 | `ddg`, `bing` | HTML SERP | нет | да (`search.engines`) |
-| `searxng`, `ollama` | локальные инстансы | нет | по конфигу endpoint |
+| `searxng`, `ollama` | локальные инстансы | нет | `searxng` — да (`search.engines`, endpoint `http://localhost:8080`); `ollama` — по конфигу endpoint |
 | `exa`, `jina`, `tavily`, `brave` | поисковые API | API-ключ | по наличию ключа |
 | `openai`, `xai` | provider-native (Responses API) | API-ключ | xai — только явно |
 | `anthropic`, `deepseek` | provider-native (Messages API) | API-ключ | — |
@@ -234,11 +234,11 @@ isError: true}`.
 
 Полный тип — `CoreConfig` (`src/types.ts`); все поля валидируются
 (`resolveCoreConfig` → `WEB_BAD_REQUEST` при нарушении). Дефолты «из коробки»
-(пустой конфиг = безключевой ddg+bing):
+(пустой конфиг = SearXNG → ddg → bing):
 
 | Блок | Ключевые поля (дефолт) |
 |---|---|
-| `search` | `engines` (ddg, bing), `mode` (fallback), `region`, `freshness`, `rateLimitPerSec` (1), `timeoutMs` (30 s), `cacheTtlMs` (15 min), `maxSerpBytes` (2 MB), `enrich` (6/5/10 s), `embed` (off) |
+| `search` | `engines` (searxng, ddg, bing), `mode` (fallback), `region`, `freshness`, `rateLimitPerSec` (1), `timeoutMs` (30 s), `cacheTtlMs` (15 min), `maxSerpBytes` (2 MB), `enrich` (6/5/10 s), `embed` (off) |
 | `fetch` | `cacheTtlMs` (24 h), `revalidate` (true), `maxBodyBytes` (5 MB), `maxOutputChars` (100 k), `timeoutMs` (30 s), `maxRedirects` (5), `allowPrivateNetworks` (false) |
 | `fetch.pdf` | `enabled` (true), `maxSizeBytes` (20 MB), `maxPages` (50) |
 | `fetch.video` | `enabled` (true) — YouTube: oEmbed + description + таймcoded-транскрипт |
@@ -250,6 +250,12 @@ isError: true}`.
 | `providers.<engine>` | `apiKey`, `baseUrl` (для provider-native), `model` — см. таблицу движков |
 | `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, отложен) |
 | `extended.contentCache` | 128/128 MiB/1 h — **no-op в v0.1** (резерв, см. «Лимиты») |
+
+Движок `searxng` в дефолтной цепочке необязателен: если локальный инстанс не
+поднят (connection refused — отказ мгновенный; молчащий хост срезается
+коротким connect-гардом ~3 s), запрос уходит в `ddg`/`bing`, а `searxng`
+уходит в cooldown и пропускается последующими запросами. Явный конфиг
+пользователя с `search.engines` работает как есть.
 
 ## Privacy-модель
 

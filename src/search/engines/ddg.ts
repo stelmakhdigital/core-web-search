@@ -7,10 +7,8 @@
 
 import { CoreError } from '../../errors.ts'
 import type { SearchSource } from '../../types.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
-import { RateLimiter } from '../rate-limit.ts'
+import { dedupeSources, serpStatusErrors, HttpSearchClient } from '../http.ts'
 import { isBlockedSerp, parseDuckDuckGoSerp, type SerpResult } from '../serpparse.ts'
-import { normalizeUrl } from '../url.ts'
 import type { EngineSearchResult, SearchEngine } from './types.ts'
 
 /** Engine options. */
@@ -35,10 +33,10 @@ export const DUCKDUCKGO_DEFAULT_ENDPOINT = 'https://html.duckduckgo.com/html/'
 /** The keyless DuckDuckGo HTML search engine. */
 export class DuckDuckGoEngine implements SearchEngine {
   readonly id = 'ddg'
-  private readonly limiter: RateLimiter
+  private readonly http: HttpSearchClient
 
   constructor(private readonly options: DuckDuckGoEngineOptions) {
-    this.limiter = new RateLimiter({ perSec: options.rateLimitPerSec })
+    this.http = new HttpSearchClient({ userAgent: options.userAgent, rateLimitPerSec: options.rateLimitPerSec })
   }
 
   /** Cheap local check: the endpoint must parse as an absolute URL. No network. */
@@ -57,7 +55,6 @@ export class DuckDuckGoEngine implements SearchEngine {
     }
     return { sources: this.filterAndDedupe(parseDuckDuckGoSerp(html)).slice(0, maxResults) }
   }
-
   private endpoint(): string {
     return this.options.endpoint.endsWith('/') ? this.options.endpoint : `${this.options.endpoint}/`
   }
@@ -72,64 +69,18 @@ export class DuckDuckGoEngine implements SearchEngine {
 
   /** Fetch the SERP document; block-like failures surface as `CoreError`. */
   private async fetchSerp(query: string, signal: AbortSignal): Promise<string> {
-    await this.limiter.acquire(signal)
-    let response: Response
-    try {
-      response = await fetch(this.serpUrl(query), {
-        method: 'GET',
-        redirect: 'follow',
-        headers: { 'user-agent': this.options.userAgent, 'accept': 'text/html' },
-        signal,
-      })
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'DuckDuckGo search request failed')
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      if (response.status === 403 || response.status === 429 || response.status === 503) {
-        throw new CoreError(
-          `DuckDuckGo blocked the search request (HTTP ${response.status}); slow down or try again later`,
-          'WEB_PROVIDER_ERROR',
-        )
-      }
-      throw new CoreError(`DuckDuckGo search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR')
-    }
-    try {
-      return await readCappedText(response, this.options.maxSerpBytes)
-    } catch (error: unknown) {
-      throw classifyWebError(error, signal, 'DuckDuckGo search body read failed')
-    }
+    return this.http.fetchText({
+      url: this.serpUrl(query),
+      headers: { accept: 'text/html' },
+      signal,
+      maxBytes: this.options.maxSerpBytes,
+      context: 'DuckDuckGo search request',
+      mapStatus: serpStatusErrors('DuckDuckGo'),
+    })
   }
 
   /** Drop blocked domains and duplicate URLs (first occurrence wins). */
   private filterAndDedupe(results: readonly SerpResult[]): SearchSource[] {
-    const seen = new Set<string>()
-    const sources: SearchSource[] = []
-    for (const result of results) {
-      const key = normalizeUrl(result.url)
-      if (seen.has(key)) continue
-      if (this.isBlockedDomain(result.url)) continue
-      seen.add(key)
-      sources.push({
-        url: result.url,
-        ...result.title.length > 0 ? { title: result.title } : {},
-        ...result.snippet.length > 0 ? { snippet: result.snippet } : {},
-      })
-    }
-    return sources
-  }
-
-  private isBlockedDomain(url: string): boolean {
-    if (this.options.blockedDomains.length === 0) return false
-    let hostname: string
-    try {
-      hostname = new URL(url).hostname.toLowerCase()
-    } catch {
-      return true
-    }
-    return this.options.blockedDomains.some((domain) => {
-      const normalized = domain.toLowerCase().replace(/^\./, '')
-      return hostname === normalized || hostname.endsWith(`.${normalized}`)
-    })
+    return dedupeSources(results, this.options.blockedDomains)
   }
 }

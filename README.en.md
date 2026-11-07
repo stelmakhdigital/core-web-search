@@ -15,7 +15,7 @@ import { createWebStack } from '@agents-web-search/core'
 
 const host = {
   identity: { name: 'my-agent', version: '1.0.0' },
-  config: {}, // empty config = keyless stack (ddg + bing)
+  config: {}, // empty config = SearXNG (if running) + keyless ddg + bing
   paths: { stateDir: '/home/user/.my-agent' },
   async credential() { return undefined },
   registerTools(specs) { /* register in the host's mechanism */ return () => {} },
@@ -39,7 +39,7 @@ await stack.dispose()
 | Id | Type | Key | Default |
 |---|---|---|---|
 | `ddg`, `bing` | HTML SERP | none | yes (`search.engines`) |
-| `searxng`, `ollama` | local instances | none | per-endpoint config |
+| `searxng`, `ollama` | local instances | none | `searxng` — yes (`search.engines`, endpoint `http://localhost:8080`); `ollama` — per-endpoint config |
 | `exa`, `jina`, `tavily`, `brave` | search APIs | API key | when a key is present |
 | `openai`, `xai` | provider-native (Responses API) | API key | xai — explicit only |
 | `anthropic`, `deepseek` | provider-native (Messages API) | API key | — |
@@ -162,11 +162,11 @@ core. The shared contract test suite for new adapters is
 
 Full type — `CoreConfig` (`src/types.ts`); every field is validated
 (`resolveCoreConfig` → `WEB_BAD_REQUEST` on violation). Out-of-the-box
-defaults (empty config = keyless ddg+bing):
+defaults (empty config = SearXNG → ddg → bing):
 
 | Block | Key fields (default) |
 |---|---|
-| `search` | `engines` (ddg, bing), `mode` (fallback), `region`, `freshness`, `rateLimitPerSec` (1), `timeoutMs` (30 s), `cacheTtlMs` (15 min), `maxSerpBytes` (2 MB), `enrich` (6/5/10 s), `embed` (off) |
+| `search` | `engines` (searxng, ddg, bing), `mode` (fallback), `region`, `freshness`, `rateLimitPerSec` (1), `timeoutMs` (30 s), `cacheTtlMs` (15 min), `maxSerpBytes` (2 MB), `enrich` (6/5/10 s), `embed` (off) |
 | `fetch` | `cacheTtlMs` (24 h), `revalidate` (true), `maxBodyBytes` (5 MB), `maxOutputChars` (100 k), `timeoutMs` (30 s), `maxRedirects` (5), `allowPrivateNetworks` (false) |
 | `fetch.pdf` | `enabled` (true), `maxSizeBytes` (20 MB), `maxPages` (50) |
 | `fetch.video` | `enabled` (true) — YouTube: oEmbed + description + timed transcript |
@@ -178,6 +178,13 @@ defaults (empty config = keyless ddg+bing):
 | `providers.<engine>` | `apiKey`, `baseUrl` (provider-native), `model` — see the engines table |
 | `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, deferred) |
 | `extended.contentCache` | 128 / 128 MiB / 1 h — **no-op in v0.1** (reserved, see Limits) |
+
+The `searxng` engine in the default chain is optional: when the local
+instance is not running (connection refused — an immediate failure; a
+silently dropping host is cut by a short ~3 s connect guard), the request
+falls through to `ddg`/`bing` and `searxng` enters a cooldown and is skipped
+by subsequent requests. An explicit user config with `search.engines` works
+as is.
 
 ## Limits (roadmap 6.5)
 

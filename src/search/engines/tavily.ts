@@ -6,7 +6,7 @@
  */
 
 import { CoreError } from '../../errors.ts'
-import { classifyWebError, readCappedText } from '../http.ts'
+import { apiStatusErrors, HttpSearchClient } from '../http.ts'
 import { normalizeUrl } from '../url.ts'
 import type { SearchSource } from '../../types.ts'
 import type { EngineSearchResult, SearchEngine, SearchEngineDeps } from './types.ts'
@@ -38,11 +38,13 @@ interface TavilyResponse {
 export class TavilyEngine implements SearchEngine {
   readonly id = 'tavily'
   private readonly options: TavilyEngineOptions
+  private readonly http: HttpSearchClient
   private cachedKey = ''
 
   constructor(options: TavilyEngineOptions) {
     this.options = options
     this.cachedKey = options.apiKey ?? ''
+    this.http = new HttpSearchClient({ userAgent: options.userAgent })
   }
 
   available(): boolean {
@@ -68,35 +70,16 @@ export class TavilyEngine implements SearchEngine {
       search_depth: this.options.depth ?? 'basic',
       include_answer: true,
     }
-    let response: Response
-    try {
-      response = await fetch(`${base}/search`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'authorization': `Bearer ${this.cachedKey}`, 'user-agent': this.options.userAgent },
-        body: JSON.stringify(body),
-        signal,
-      })
-    } catch (error) {
-      throw classifyWebError(error, signal, 'Tavily search request failed')
-    }
-    if (response.status === 401 || response.status === 403) {
-      await response.body?.cancel()
-      throw new CoreError(`Tavily rejected the API key (HTTP ${response.status})`, 'WEB_AUTH', { cause: response })
-    }
-    if (response.status === 429) {
-      await response.body?.cancel()
-      throw new CoreError('Tavily rate limit exceeded (HTTP 429)', 'WEB_QUOTA', { cause: response })
-    }
-    if (!response.ok) {
-      await response.body?.cancel()
-      throw new CoreError(`Tavily search request failed (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: response })
-    }
-    let text: string
-    try {
-      text = await readCappedText(response, 1_048_576)
-    } catch (error) {
-      throw classifyWebError(error, signal, 'Tavily search body read failed')
-    }
+    const text = await this.http.fetchText({
+      url: `${base}/search`,
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'authorization': `Bearer ${this.cachedKey}` },
+      body: JSON.stringify(body),
+      signal,
+      maxBytes: 1_048_576,
+      context: 'Tavily search request',
+      mapStatus: apiStatusErrors('Tavily'),
+    })
     let parsed: TavilyResponse
     try {
       parsed = JSON.parse(text) as TavilyResponse
