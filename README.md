@@ -271,8 +271,12 @@ isError: true}`.
 
 ## Browser-модуль
 
-Опциональный модуль ядра (Q8): Playwright — optional dependency (ставится
-только при `browser.enabled: true`). Инструменты: `browser_open`,
+Модуль ядра (Q8): Playwright — optional dependency; в ядре включается при
+`browser.enabled: true` (дефолт ядра — false; pi-адаптер включает модуль
+по умолчанию, см. его README). Перед первым использованием скачайте
+браузер: `npx playwright install chromium` (готовность проверяет
+`browserReadiness()` из публичного API; в pi-адаптере проверка идёт
+на `session_start`). Инструменты: `browser_open`,
 `browser_navigate`, `browser_snapshot` (интерактивные элементы с ref +
 текст), `browser_screenshot` (PNG в state dir, опционально inline),
 `browser_click`/`browser_type`/`browser_evaluate` (по

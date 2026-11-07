@@ -27,4 +27,5 @@ export {
 } from './playwright.ts'
 export { ANON_KEY, createBrowserManager, type BrowserManager, type BrowserManagerOptions } from './manager.ts'
 export { buildBrowserTools, type BrowserToolDeps } from './tools.ts'
+export { browserReadiness, type BrowserReadiness } from './readiness.ts'
 export { writeScreenshot } from './screenshot.ts'

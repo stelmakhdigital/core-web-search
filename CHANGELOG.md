@@ -2,6 +2,27 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.1.1] — 2026-11-07
+
+Ядро поставляется с декларациями типов; публичная проверка готовности
+браузера. Исправляет CI адаптеров: в GH-окружении sibling-путь `paths` не
+резолвился, а тарболл был без типов (implicit-any каскад с 2026-09-29).
+
+### Добавлено
+
+- `browserReadiness()` (и тип `BrowserReadiness`) в публичном API: докладует,
+  что playwright импортируем и бинарник Chromium скачан, с actionable-подсказкой;
+  ничего не запускает и не качает — для `session_start` хостов.
+- `lib/index.d.ts`: сборка генерирует декларации (`tsc -p tsconfig.build.json`,
+  `rewriteRelativeImportExtensions`); `types` + `exports.types` в package.json.
+- Тесты: `browserReadiness` на реальном окружении.
+
+### Изменено
+
+- CI: actions/checkout@v5, actions/setup-node@v5 (снимает deprecation Node 20).
+- README (RU/EN): секция Browser-модуля — pi-адаптер включает браузер по
+  умолчанию, `browserReadiness()` как встроенная проверка.
+
 ## [1.1.0] — 2026-11-07
 
 SearXNG — первый движок дефолтной цепочки; быстрый отказ; чистка boilerplate

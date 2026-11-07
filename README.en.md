@@ -240,8 +240,12 @@ Security review 2026-09-21 (roadmap 6.3):
 
 ## Browser module
 
-An optional core module (Q8): Playwright is an optional dependency
-(installed only with `browser.enabled: true`). Tools: `browser_open`,
+A core module (Q8): Playwright is an optional dependency; the core enables
+it with `browser.enabled: true` (the core default is false; the Pi adapter
+turns it on by default — see its README). Before the first use download the
+browser: `npx playwright install chromium` (readiness is exposed via
+`browserReadiness()` from the public API; the Pi adapter probes it on
+`session_start`). Tools: `browser_open`,
 `browser_navigate`, `browser_snapshot` (interactive elements with refs +
 text), `browser_screenshot` (PNG in the state dir, optionally
 inlined), `browser_click`/`browser_type`/`browser_evaluate` (per
