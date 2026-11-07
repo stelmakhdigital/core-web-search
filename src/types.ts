@@ -371,10 +371,5 @@ export interface CoreConfig {
       readonly host?: string
       readonly remote?: boolean
     }
-    readonly contentCache?: {
-      readonly maxEntries?: number
-      readonly maxBytes?: number
-      readonly ttlMs?: number
-    }
   }
 }

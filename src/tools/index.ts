@@ -28,6 +28,8 @@ export interface ToolHost {
   fetch(request: { readonly url: string }, signal?: AbortSignal): Promise<FetchResult>
   /** One platform search. */
   platformSearch(request: { readonly platform: string; readonly query: string; readonly maxResults?: number }, signal?: AbortSignal): Promise<PlatformSearchResult>
+  /** Per-engine routing diagnostics (cooldowns, availability); optional. */
+  readonly searchDiagnostics?: () => readonly import('../search/provider.ts').EngineDiagnostics[]
   /** Host LLM client (optional) — powers `web_fetch` question mode (5.1). */
   readonly llm?: LlmClient
 }
@@ -545,7 +547,21 @@ export function buildStatsTool(host: ToolHost): ToolSpec {
         `Page bytes: ${stats.pageBytes}`,
         `Store: ${host.config.store.path}`,
       ]
-      return { text: lines.join('\n'), details: stats }
+      const engines = host.searchDiagnostics?.() ?? []
+      const engineLines = engines.map((engine) => {
+        const bits: string[] = []
+        if (!engine.available) bits.push('unavailable')
+        if (engine.inChain) bits.push('in chain')
+        if (engine.coolingDown) bits.push(`cooldown ${engine.remainingMs} ms`)
+        if (engine.consecutiveFailures > 0) bits.push(`${engine.consecutiveFailures} consecutive failure(s)`)
+        return `- ${engine.id}: ${bits.length > 0 ? bits.join(', ') : 'idle'}`
+      })
+      if (engineLines.length > 0) {
+        lines.push('Engines:')
+        lines.push(...engineLines)
+      }
+      const details = { ...stats, ...(engines.length > 0 ? { engines } : {}) }
+      return { text: lines.join('\n'), details }
     }),
   }
 }

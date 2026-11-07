@@ -71,7 +71,7 @@ export { buildEngines, DEFAULT_BLOCKED_DOMAINS, explicitOnlyEngineIds } from './
 export type { SearchEngine, EngineSearchResult, SearchEngineDeps, SecretSpec, SecretResolver } from './search/engines/types.ts'
 
 // Search internals (router, cache key)
-export { MultiSearchProvider, MULTI_SEARCH_PROVIDER_ID, searchCacheKey } from './search/provider.ts'
+export { MultiSearchProvider, MULTI_SEARCH_PROVIDER_ID, searchCacheKey, type EngineDiagnostics } from './search/provider.ts'
 
 // Fetch internals
 export { CachedHttpFetchProvider, CACHED_FETCH_PROVIDER_ID, checkSsrf, buildFetchLimits } from './fetch/index.ts'

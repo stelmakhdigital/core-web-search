@@ -157,6 +157,7 @@ export function createWebStack(host: HostAdapter): WebStack {
     search: (request, signal) => searchStack(request, signal),
     fetch: (request, signal) => fetcher.fetch({ url: request.url }, signal),
     platformSearch: (request, signal) => platformSearchStack(request, signal),
+    searchDiagnostics: () => multi.diagnostics(),
     llm: host.llm,
   }
 

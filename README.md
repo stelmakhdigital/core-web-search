@@ -105,10 +105,7 @@ web_fetch, curator-саммари) требуют `HostAdapter.llm` — без �
 | tools | `web_search.max_results` | 5 (1–20) | выход за диапазон → `WEB_BAD_REQUEST` |
 | curator | prompt / `maxTokens` / body / entries | 20 k / 512 / 1 MiB / 50 | лимиты LLM-вывода: 512 токена (advisory для хоста) |
 
-**Зарезервировано (no-op в v0.1):** `extended.contentCache` (128 записей /
-128 MiB / 1 ч) — in-memory-кэш `get_search_content` отложен; конфиг
-валидируется, эффекта пока нет (контент приходит из WebStore). Коoldown
-движков — константы стека (30 s / 1 h), в конфиг не вынесены.
+**Cooldown движков** — константы стека (30 s / 1 h), в конфиг не вынесены.
 
 ## Безопасность
 
@@ -249,7 +246,6 @@ isError: true}`.
 | `browser` | `enabled` (false), `headless` (true), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
 | `providers.<engine>` | `apiKey`, `baseUrl` (для provider-native), `model` — см. таблицу движков |
 | `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, отложен) |
-| `extended.contentCache` | 128/128 MiB/1 h — **no-op в v0.1** (резерв, см. «Лимиты») |
 
 Движок `searxng` в дефолтной цепочке необязателен: если локальный инстанс не
 поднят (connection refused — отказ мгновенный; молчащий хост срезается
