@@ -2,6 +2,35 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.0.1] — 2026-11-07
+
+SearXNG — первый движок дефолтной цепочки; быстрый отказ; чистка boilerplate
+HTTP-движков. Версия пакета не поднята (`.vendor`-тарболл адаптеров пинится
+по имени `agents-web-search-core-1.0.0.tgz`); изменения в тарболл попадают
+при следующей пересборке (`npm run pack:core`).
+
+### Изменено
+
+- `DEFAULT_ENGINES` = `['searxng', 'ddg', 'bing']` (было `['ddg', 'bing']`):
+  пустой конфиг сначала пробует локальный инстанс SearXNG, затем
+  безключевые ddg/bing. Явные конфиги с `search.engines` работают как есть.
+- Быстрый отказ недоступного инстанса: ECONNREFUSED завершается сразу
+  (без ретраев); молчащий хост срезается connect-гардом (~3 s, опция
+  `connectTimeoutMs` у SearXNGEngine), таймер снимается после заголовков.
+- `src/search/engines/`: общий `HttpSearchClient` (rate-limit, fetch/
+  classify/capped-read, маппинг статусов `serpStatusErrors`/`apiStatusErrors`)
+  и хелперы `dedupeSources`/`isBlockedDomain` — дубли убраны из ddg, bing,
+  searxng, tavily, jina, exa, brave, ollama. Публичный API и формат
+  `SearchSource` не менялись.
+
+### Добавлено
+
+- Экспорт `SEARXNG_DEFAULT_ENDPOINT` из `src/index.ts` (адаптерам для
+  health-check).
+- Тесты: fast-fail на закрытом порту, cooldown-пропуск после падения,
+  connect-guard (тихий хост / живой эндпоинт), дедупликация; живой
+  интеграционный тест локального инстанса — opt-in `WEB_SEARCH_LIVE=1`.
+
 ## [1.0.0] — 2026-09-21
 
 Первый стабильный релиз: полный функциональный скоуп (фазы 3–7), security-
