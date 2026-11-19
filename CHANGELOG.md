@@ -2,6 +2,25 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.3.1] — 2026-11-18
+
+### Fixed
+
+- `browserReadiness()` больше не вводит в заблуждение на голых Linux-хостах:
+  бинарник Chromium может лежать на диске, но не запускаться без системных
+  библиотек (libnspr4/libnss3/libasound). Readiness теперь дополнительно
+  разбирает `ldd` бинарника (Linux-only, без запуска браузера) и при
+  недостающих библиотеках отдаёт hint со списком библиотек и командами
+  `npx playwright install --with-deps chromium` / apt. Проверочный шов
+  `browserReadiness({ platform, missingLibs })` для тестов; `lddMissingLibs`
+  экспортирован.
+
+### Tests
+
+- `test/live-browser.local.test.ts` — живой браузерный e2e (open → snapshot
+  → click → close на реальном Chromium), гейт `WEB_SEARCH_LIVE=1`, чистый
+  skip когда браузер не запускается; вне CI.
+
 ## [1.3.0] — 2026-11-07
 
 ### Added
