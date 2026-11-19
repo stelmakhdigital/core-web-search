@@ -27,6 +27,39 @@ describe('browserReadiness (real environment)', () => {
 })
 
 describe('browserReadiness (seams)', () => {
+  it('linux + missing system libraries (executable override): hint names the libs and --with-deps', async () => {
+    const readiness = await browserReadiness({
+      platform: 'linux',
+      executable: '/bin/ls', // any existing binary on any runner
+      missingLibs: async () => ['libnspr4.so', 'libnss3.so'],
+    })
+    expect(readiness.chromium).toBe(true)
+    expect(readiness.hint).toContain('libnspr4.so')
+    expect(readiness.hint).toContain('libnss3.so')
+    expect(readiness.hint).toContain('--with-deps')
+  })
+
+  it('linux + all libraries present (executable override): ready', async () => {
+    const readiness = await browserReadiness({ platform: 'linux', executable: '/bin/ls', missingLibs: async () => [] })
+    expect(readiness.chromium).toBe(true)
+    expect(readiness.hint).toBeUndefined()
+  })
+
+  it('linux + ldd unavailable (probe declines): ready without guessing', async () => {
+    const readiness = await browserReadiness({ platform: 'linux', executable: '/bin/ls', missingLibs: async () => undefined })
+    expect(readiness.hint).toBeUndefined()
+  })
+
+  it('executable override absent: not-downloaded branch wins regardless of libs', async () => {
+    const readiness = await browserReadiness({
+      platform: 'linux',
+      executable: '/nonexistent/chromium-binary-here',
+      missingLibs: async () => ['libnspr4.so'],
+    })
+    expect(readiness.chromium).toBe(false)
+    expect(readiness.hint).toContain('playwright install chromium')
+  })
+
   it('linux + missing system libraries: chromium true, hint names the libs and --with-deps', async () => {
     const readiness = await browserReadiness({
       platform: 'linux',
