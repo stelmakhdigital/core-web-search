@@ -17,12 +17,15 @@ export interface BrowserReadiness {
     /** Actionable fix when something is missing; undefined when ready. */
     readonly hint?: string;
 }
-/** Test seam: platform + `ldd` runner (both overridable in tests). */
+/** Test seam: platform + `ldd` runner + executable override (all overridable
+ * in tests so the launchability branch is exercised on any runner). */
 export interface ReadinessDeps {
     readonly platform?: NodeJS.Platform;
     /** Missing shared-library names for one executable, or undefined when the
      * probe does not apply (non-Linux, no ldd) — never rejects. */
     readonly missingLibs?: (executable: string) => Promise<readonly string[] | undefined>;
+    /** Override the Chromium executable path (tests; default is playwright's). */
+    readonly executable?: string;
 }
 /** `ldd <executable>` → the `=> not found` library names (Linux only). */
 export declare function lddMissingLibs(executable: string): Promise<readonly string[] | undefined>;
