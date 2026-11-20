@@ -26,7 +26,13 @@ export interface ReadinessDeps {
     readonly missingLibs?: (executable: string) => Promise<readonly string[] | undefined>;
     /** Override the Chromium executable path (tests; default is playwright's). */
     readonly executable?: string;
+    /** Package-family override for the missing-libraries hint (tests;
+     * default is detected from /etc/os-release on Linux). */
+    readonly distro?: string | undefined;
 }
+/** Package family for install hints: 'debian' | 'fedora' | 'arch' | 'alpine'
+ * (from /etc/os-release ID/ID_LIKE); undefined when unrecognized. */
+export declare function detectDistroFamily(): string | undefined;
 /** `ldd <executable>` → the `=> not found` library names (Linux only). */
 export declare function lddMissingLibs(executable: string): Promise<readonly string[] | undefined>;
 /**
