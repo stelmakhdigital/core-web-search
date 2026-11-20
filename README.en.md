@@ -174,7 +174,7 @@ defaults (empty config = SearXNG → ddg → bing):
 | `platforms` | `enabled` (true), `maxResults` (20), `timeoutMs` (30 s), `maxBytes` (5 MB), `platforms[]` (custom), `rulePackPaths[]` |
 | `store` | `path` (`<stateDir>/web.db`), `evictLimits` (1000/500) |
 | `ssrf` | `trustEnvProxy` (false) |
-| `browser` | `enabled` (false), `headless` (true), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
+| `browser` | `enabled` (false), `headless` (true), `headlessMode` (chrome — full build in new-headless, falls back to the shell), `userAgent` (derived from the build version, Headless token stripped), `launchArgs` ([]), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
 | `providers.<engine>` | `apiKey`, `baseUrl` (provider-native), `model` — see the engines table |
 | `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, deferred) |
 

@@ -243,7 +243,7 @@ isError: true}`.
 | `platforms` | `enabled` (true), `maxResults` (20), `timeoutMs` (30 s), `maxBytes` (5 MB), `platforms[]` (custom), `rulePackPaths[]` |
 | `store` | `path` (`<stateDir>/web.db`), `evictLimits` (1000/500) |
 | `ssrf` | `trustEnvProxy` (false) |
-| `browser` | `enabled` (false), `headless` (true), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
+| `browser` | `enabled` (false), `headless` (true), `headlessMode` (chrome — full build в new-headless, fallback на shell), `userAgent` (UA из версии сборки, без токена Headless), `launchArgs` ([]), `approval` (navigate), `allowPrivateNetworks` (false), `maxConcurrentTabs` (1), `timeoutMs` (30 s) |
 | `providers.<engine>` | `apiKey`, `baseUrl` (для provider-native), `model` — см. таблицу движков |
 | `extended.curator` | `enabled` (false), `bind` (127.0.0.1), `host` (localhost), `remote` (false, отложен) |
 

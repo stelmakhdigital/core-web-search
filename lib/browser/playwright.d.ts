@@ -24,6 +24,21 @@ export interface PlaywrightProviderConfig {
      * a trusted, network-isolated environment.
      */
     readonly allowPrivateNetworks?: boolean;
+    /**
+     * Headless engine: `'chrome'` (default) launches the full Chromium build in
+     * new headless mode — a materially better fingerprint than the headless
+     * shell against bot checks (falls back to the shell when only the shell was
+     * downloaded); `'shell'` keeps the classic `chromium_headless_shell`.
+     */
+    readonly headlessMode?: 'shell' | 'chrome';
+    /**
+     * Context user agent. Default: derived from the launched build's real
+     * version with the `HeadlessChrome` token removed (matching the host OS
+     * family). Set to pin an explicit UA.
+     */
+    readonly userAgent?: string;
+    /** Extra Chromium launch args (appended to the stealth defaults). */
+    readonly launchArgs?: readonly string[];
 }
 /** A minimal browser backend contract (the manager's provider surface). */
 export interface CoreBrowserProvider {
@@ -40,6 +55,20 @@ export interface CoreBrowserProvider {
  * (against rebinding) — the same guard as the fetch layer.
  */
 export declare function assertPublicNavigation(url: string, allowPrivate: boolean): Promise<void>;
+/**
+ * Launch hardening applied by default: removes the `navigator.webdriver`
+ * automation marker. This is fingerprint hygiene, not fingerprint spoofing —
+ * the provider does not fake plugins/screens beyond the UA.
+ */
+export declare const STEALTH_ARGS: readonly string[];
+/**
+ * The context user agent: explicit override wins; otherwise a Chrome UA
+ * derived from the launched build's version — Playwright's `Browser.version()`
+ * returns a bare number (`159.0.8154.6`), while UA strings carry
+ * `Chrome/…`/`HeadlessChrome/…`; both shapes map to `Chrome/<major>.0.0.0`.
+ * Undefined when no version is known (the browser default UA stays).
+ */
+export declare function contextUserAgent(version: string | undefined, override: string | undefined, platform?: NodeJS.Platform): string | undefined;
 /** The playwright package, loaded lazily (see {@link loadPlaywright}). */
 type PlaywrightModule = typeof import('playwright');
 /**
@@ -55,6 +84,9 @@ export declare function loadPlaywright(): Promise<PlaywrightModule>;
 export declare class PlaywrightProvider implements CoreBrowserProvider {
     readonly id = "playwright";
     private readonly headless;
+    private readonly headlessMode;
+    private readonly userAgent;
+    private readonly launchArgs;
     private readonly timeoutMs;
     private readonly authProfiles;
     private readonly maxTextLength;

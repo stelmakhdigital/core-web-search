@@ -327,6 +327,16 @@ export interface CoreConfig {
         readonly enabled?: boolean;
         /** Run the browser headless (no visible window). Default true. */
         readonly headless?: boolean;
+        /**
+         * Headless engine: 'chrome' (default) = full Chromium build in new
+         * headless mode (better bot-resistance; falls back to the shell when only
+         * the shell was installed); 'shell' = classic chromium_headless_shell.
+         */
+        readonly headlessMode?: 'shell' | 'chrome';
+        /** Context UA override; by default a Chrome UA derived from the build. */
+        readonly userAgent?: string;
+        /** Extra Chromium launch args (appended to the stealth defaults). */
+        readonly launchArgs?: readonly string[];
         /** Approval policy: 'never' | 'navigate' | 'all'. Default 'navigate'. */
         readonly approval?: 'never' | 'navigate' | 'all';
         readonly allowPrivateNetworks?: boolean;

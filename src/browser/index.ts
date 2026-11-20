@@ -20,8 +20,10 @@ export {
 } from './types.ts'
 export {
   assertPublicNavigation,
+  contextUserAgent,
   loadPlaywright,
   PlaywrightProvider,
+  STEALTH_ARGS,
   type CoreBrowserProvider,
   type PlaywrightProviderConfig,
 } from './playwright.ts'

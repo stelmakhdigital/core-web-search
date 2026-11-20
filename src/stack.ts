@@ -144,6 +144,9 @@ export function createWebStack(host: HostAdapter): WebStack {
   const browserManager = config.browser.enabled
     ? createBrowserManager({
         headless: config.browser.headless,
+        headlessMode: config.browser.headlessMode,
+        userAgent: config.browser.userAgent,
+        launchArgs: config.browser.launchArgs,
         timeoutMs: config.browser.timeoutMs,
         authProfiles: config.browser.authProfiles,
         allowPrivateNetworks: config.browser.allowPrivateNetworks,

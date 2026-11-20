@@ -2,6 +2,29 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.5.0] — 2026-11-21
+
+### Added
+
+- Антибот-гигиена запуска браузера (по умолчанию, без конфига):
+  - `--disable-blink-features=AutomationControlled` — снимает флаг
+    `navigator.webdriver`;
+  - user-agent контекста выводится из реальной версии сборки
+    (`HeadlessChrome/159…` или голое `159.0.8154.6` → `Chrome/159.0.0.0`,
+    платформенный токен по ОС хоста); переопределяется `browser.userAgent`;
+  - headless теперь запускает полный Chromium в new-headless
+    (`headlessMode: 'chrome'` по умолчанию) — отпечаток заметно честнее
+    классического headless-shell; если скачан только shell, провайдер сам
+    откатывается на shell. `browser.headlessMode: 'shell'` возвращает
+    прежнее поведение.
+- Новые поля конфига `browser`: `headlessMode`, `userAgent`, `launchArgs`.
+
+### Why
+
+Голое headless-shell с UA `HeadlessChrome` резалось антибот-проверками
+сайтов (нестиковая проверка: Авито отдаёт «Доступ ограничен», с этими
+флагами и UA выдача открывается headless-запуском из коробки).
+
 ## [1.4.0] — 2026-11-20
 
 ### Added
