@@ -10,7 +10,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 import { loadPlaywright } from './playwright.ts'
 
@@ -33,6 +33,49 @@ export interface ReadinessDeps {
   readonly missingLibs?: (executable: string) => Promise<readonly string[] | undefined>
   /** Override the Chromium executable path (tests; default is playwright's). */
   readonly executable?: string
+  /** Package-family override for the missing-libraries hint (tests;
+   * default is detected from /etc/os-release on Linux). */
+  readonly distro?: string | undefined
+}
+
+/** Package family for install hints: 'debian' | 'fedora' | 'arch' | 'alpine'
+ * (from /etc/os-release ID/ID_LIKE); undefined when unrecognized. */
+export function detectDistroFamily(): string | undefined {
+  let text: string
+  try {
+    text = readFileSync('/etc/os-release', 'utf8')
+  } catch {
+    return undefined
+  }
+  // /etc/os-release values appear quoted (VERSION_ID="24.04") or bare
+  // (ID=ubuntu) depending on the distro — accept both.
+  const field = (name: string): string => {
+    const m = new RegExp(`(?:^|\\n)${name}="([^"\n]*)"|(?:^|\\n)${name}=([^"\n]*)`).exec(text)
+    return m?.[1] ?? m?.[2] ?? ''
+  }
+  const ids = `${field('ID')} ${field('ID_LIKE')}`.toLowerCase()
+  if (/debian|ubuntu/.test(ids)) return 'debian'
+  if (/fedora|rhel|centos/.test(ids)) return 'fedora'
+  if (/arch/.test(ids)) return 'arch'
+  if (/alpine/.test(ids)) return 'alpine'
+  return undefined
+}
+
+/** Direct library-install command per package family (undefined = none known;
+ * the generic `--with-deps` form stays the primary suggestion everywhere). */
+function libInstallCommand(family: string | undefined): string | undefined {
+  switch (family) {
+    case 'debian':
+      return 'sudo apt-get install -y libnspr4 libnss3 libasound2t64'
+    case 'fedora':
+      return 'sudo dnf install -y nspr nss alsa-lib'
+    case 'arch':
+      return 'sudo pacman -S nspr nss alsa-lib'
+    case 'alpine':
+      return 'sudo apk add nspr nss alsa-lib'
+    default:
+      return undefined
+  }
 }
 
 /** `ldd <executable>` → the `=> not found` library names (Linux only). */
@@ -81,13 +124,14 @@ export async function browserReadiness(deps: ReadinessDeps = {}): Promise<Browse
     if (platform === 'linux') {
       const missing = await missingLibs(executable)
       if (missing !== undefined && missing.length > 0) {
+        const distro = deps.distro ?? detectDistroFamily()
+        const direct = libInstallCommand(distro)
         return {
           playwright: true,
           chromium: true,
           hint:
             `the Chromium binary is present, but system libraries are missing (${missing.join(', ')}) — `
-            + 'run `npx playwright install --with-deps chromium` (needs sudo), or install the libraries '
-            + 'directly (apt: `sudo apt-get install -y libnspr4 libnss3 libasound2`), '
+            + 'run `npx playwright install --with-deps chromium` (needs sudo)' + (direct === undefined ? '' : `, or ${direct}`) + ', '
             + 'or disable the browser module (browser.enabled: false in the config)',
         }
       }

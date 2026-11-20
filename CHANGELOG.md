@@ -2,6 +2,29 @@
 
 Формат — Keep a Changelog; даты — по факту коммитов (ветка `master`).
 
+## [1.4.0] — 2026-11-20
+
+### Added
+
+- `installChromium()` — скачивание бинарника Chromium через локальный
+  playwright CLI (`playwright install chromium`), одним child-process
+  вызовом: пишет только в кэш браузера пользователя, не требует прав,
+  идемпотентно. Системные библиотеки сознательно НЕ ставятся (root-слой) —
+  для них hint с命令 под дистрибутив. Хосты зовут это в фоне по флагу
+  `browser.autoDownload` (pi-адаптер).
+- Hint readiness про недостающие системные библиотеки стал дистрибутивно-
+  точным: семья пакетов определяется по `/etc/os-release` (ID/ID_LIKE) и к
+  универсальному `npx playwright install --with-deps chromium` добавляется
+  прямая команда: apt (`libnspr4 libnss3 libasound2t64`), dnf, pacman или
+  apk (`nspr nss alsa-lib`). Для нераспознанных дистрибутивов — только
+  универсальная форма, выдуманных пакетов нет. Швы: `ReadinessDeps.distro`,
+  экспорт `detectDistroFamily`.
+
+### Tests
+
+- `test/browser-install.test.ts` — seam-вызовы CLI + реальный `runCapturing`
+  на тривиальных node-процессах (без сети).
+
 ## [1.3.1] — 2026-11-18
 
 ### Fixed

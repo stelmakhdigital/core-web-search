@@ -8,5 +8,6 @@ export { type BrowserElement, type BrowserNavigateResult, type BrowserOpenOption
 export { assertPublicNavigation, loadPlaywright, PlaywrightProvider, type CoreBrowserProvider, type PlaywrightProviderConfig, } from './playwright.ts';
 export { ANON_KEY, createBrowserManager, type BrowserManager, type BrowserManagerOptions } from './manager.ts';
 export { buildBrowserTools, type BrowserToolDeps } from './tools.ts';
-export { browserReadiness, type BrowserReadiness } from './readiness.ts';
+export { browserReadiness, detectDistroFamily, lddMissingLibs, type BrowserReadiness, type ReadinessDeps, } from './readiness.ts';
+export { installChromium, type InstallChromiumDeps, type InstallChromiumResult } from './install.ts';
 export { writeScreenshot } from './screenshot.ts';

@@ -106,6 +106,8 @@ export {
   createBrowserManager,
   buildBrowserTools,
   browserReadiness,
+  detectDistroFamily,
+  installChromium,
   writeScreenshot,
   ANON_KEY,
   loadPlaywright,
@@ -125,6 +127,9 @@ export {
   type PlaywrightProviderConfig,
   type BrowserToolDeps,
   type BrowserReadiness,
+  type ReadinessDeps,
+  type InstallChromiumDeps,
+  type InstallChromiumResult,
 } from './browser/index.ts'
 
 

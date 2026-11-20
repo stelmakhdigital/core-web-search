@@ -39,6 +39,36 @@ describe('browserReadiness (seams)', () => {
     expect(readiness.hint).toContain('--with-deps')
   })
 
+  it('distro seam: per-family direct install command appears in the hint', async () => {
+    const base = { platform: 'linux' as const, executable: '/bin/ls', missingLibs: async () => ['libnspr4.so'] }
+    const fedora = await browserReadiness({ ...base, distro: 'fedora' })
+    expect(fedora.hint).toContain('dnf install -y nspr nss alsa-lib')
+    const arch = await browserReadiness({ ...base, distro: 'arch' })
+    expect(arch.hint).toContain('pacman -S nspr nss alsa-lib')
+    const alpine = await browserReadiness({ ...base, distro: 'alpine' })
+    expect(alpine.hint).toContain('apk add nspr nss alsa-lib')
+    const debian = await browserReadiness({ ...base, distro: 'debian' })
+    expect(debian.hint).toContain('apt-get install -y libnspr4 libnss3 libasound2t64')
+    // Unknown distro: only the generic --with-deps form, no invented packages.
+    const unknown = await browserReadiness({ ...base, distro: 'plan9' })
+    expect(unknown.hint).toContain('--with-deps')
+    expect(unknown.hint).not.toContain('apt-get')
+    expect(unknown.hint).not.toContain('dnf')
+  })
+
+  it('detectDistroFamily reads /etc/os-release on Linux (real env invariant)', async () => {
+    if (process.platform !== 'linux') return // no /etc/os-release contract elsewhere
+    const { existsSync, readFileSync } = await import('node:fs')
+    const { detectDistroFamily } = await import('../src/browser/readiness.ts')
+    if (!existsSync('/etc/os-release')) return
+    const family = detectDistroFamily()
+    // The file exists → either a mapped family or undefined for genuinely
+    // exotic distros; on CI (ubuntu) it must be 'debian'.
+    const like = readFileSync('/etc/os-release', 'utf8')
+    if (/ubuntu|debian/.test(like)) expect(family).toBe('debian')
+    else expect(['fedora', 'arch', 'alpine', undefined]).toContain(family)
+  })
+
   it('linux + all libraries present (executable override): ready', async () => {
     const readiness = await browserReadiness({ platform: 'linux', executable: '/bin/ls', missingLibs: async () => [] })
     expect(readiness.chromium).toBe(true)
