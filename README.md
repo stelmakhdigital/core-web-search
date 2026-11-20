@@ -140,7 +140,7 @@ Security-ревью 2026-09-21 (roadmap 6.3) — состояние:
 
 Канал дистрибуции — **git** (решение 2026-09-21: пакеты не публикуются в
 npm; имена `@agents-web-search/*` сохранены как идентификаторы пакетов).
-Репозиторий адаптеров самодостаточен: core (pinned `v1.5.0`) лежит в нём
+Репозиторий адаптеров самодостаточен: core (pinned `v1.5.1`) лежит в нём
 тарболом (`.vendor/`), а DSH-плагин — предсобраным бандлом
 (`packages/dsh/lib/`) — клон ставится офлайн.
 
@@ -180,8 +180,8 @@ Built-in web-пакеты DSH (id `http`/`deepseek`/…) сосуществую�
 (сам клонирует в каталог установки и делает `npm install`):
 
 ```sh
-pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.4.15   # user scope
-pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.4.15  # project scope
+pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.4.17   # user scope
+pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.4.17  # project scope
 pi list                                    # проверка
 # обновление: pi update (для зафиксированного ref — fetch origin <ref>)
 ```
@@ -197,9 +197,9 @@ extension → fail-fast при старте Pi (6.4).
 (репозиторий содержит предсобранное `lib/`):
 
 ```sh
-pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
+pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.1
 # или npm:
-npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
+npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.1
 ```
 
 ## Как написать свой адаптер (HostAdapter)

@@ -69,7 +69,7 @@ summaries via `HostAdapter.llm`, discard).
 Distribution channel: **git** (decision 2026-09-21: the packages are not
 published to npm; the `@agents-web-search/*` names are kept as package
 identifiers). The adapters repo is self-contained: the pinned core
-(`v1.5.0`) ships inside the repo as a tarball (`.vendor/`) and the DSH
+(`v1.5.1`) ships inside the repo as a tarball (`.vendor/`) and the DSH
 plugin as a prebuilt bundle (`packages/dsh/lib/`) — a fresh clone
 installs offline.
 
@@ -109,8 +109,8 @@ Adapter: [`@agents-web-search/pi`](https://github.com/stelmakhdigital/agents-web
 (it clones into its install dir and runs `npm install` itself):
 
 ```sh
-pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.4.15   # user scope
-pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.4.15  # project scope
+pi install https://github.com/stelmakhdigital/agents-web-search.git@v1.4.17   # user scope
+pi install -l https://github.com/stelmakhdigital/agents-web-search.git@v1.4.17  # project scope
 pi list                                    # verify
 # update: pi update (for a pinned ref — fetch origin <ref>)
 ```
@@ -126,9 +126,9 @@ The core is a plain package (repo root `core-web-search`) and can be
 installed straight from git (the repo ships a prebuilt `lib/`):
 
 ```sh
-pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
+pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.1
 # or with npm:
-npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
+npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.1
 ```
 
 ## Writing your own adapter (HostAdapter)
