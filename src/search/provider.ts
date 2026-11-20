@@ -80,7 +80,7 @@ export class MultiSearchProvider {
     const startedAt = Date.now()
 
     // 1. Search cache: a fresh cached result short-circuits the whole operation.
-    const cacheKey = searchCacheKey(query, this.options.engines, this.options.mode)
+    const cacheKey = searchCacheKey(query, this.options.engines, this.options.mode, maxResults)
     const cached = await this.options.store.readSearch(cacheKey).catch(() => undefined)
     if (cached !== undefined && Date.now() - cached.createdAt < this.options.searchCacheTtlMs) {
       // The store is type-agnostic (`sources` is opaque JSON); the recorded
@@ -249,15 +249,20 @@ export interface EngineDiagnostics {
 }
 
 /**
- * Build the search cache key from the normalized query, engine list, and
- * mode. @param query - the trimmed query.
+ * Build the search cache key from the normalized query, engine list, mode,
+ * and result cap (a cached 5-result page must not answer a 20-result
+ * request). `recency`/`domains` are deliberately absent: the router does not
+ * pass them to engines, so they do not change the stored result.
+ * @param query - the trimmed query.
  * @param engines - the ordered engine list.
  * @param mode - the routing mode.
+ * @param maxResults - the resolved result cap (omitted = any).
  * @returns the cache key.
  */
-export function searchCacheKey(query: string, engines: readonly string[], mode: string): string {
+export function searchCacheKey(query: string, engines: readonly string[], mode: string, maxResults?: number): string {
   const normalized = query.toLowerCase().replace(/\s+/g, ' ')
-  return `multi:${mode}:${[...engines].join(',')}:${normalized}`
+  const limit = maxResults !== undefined ? String(maxResults) : 'any'
+  return `multi:${mode}:${[...engines].join(',')}:${limit}:${normalized}`
 }
 
 /** Drop duplicate URLs across the merged list (first occurrence wins). */

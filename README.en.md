@@ -69,7 +69,7 @@ summaries via `HostAdapter.llm`, discard).
 Distribution channel: **git** (decision 2026-09-21: the packages are not
 published to npm; the `@agents-web-search/*` names are kept as package
 identifiers). The adapters repo is self-contained: the pinned core
-(`v1.0.0`) ships inside the repo as a tarball (`.vendor/`) and the DSH
+(`v1.5.0`) ships inside the repo as a tarball (`.vendor/`) and the DSH
 plugin as a prebuilt bundle (`packages/dsh/lib/`) — a fresh clone
 installs offline.
 
@@ -126,9 +126,9 @@ The core is a plain package (repo root `core-web-search`) and can be
 installed straight from git (the repo ships a prebuilt `lib/`):
 
 ```sh
-pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
 # or with npm:
-npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
 ```
 
 ## Writing your own adapter (HostAdapter)
@@ -199,12 +199,14 @@ github 200 MB / 500 entries; platforms 20 / 30 s / 5 MB; store eviction
 
 Security review 2026-09-21 (roadmap 6.3):
 
-- **SSRF guard**: literal + post-DNS (anti-rebinding) checks, IPv4/IPv6
+- **SSRF guard**: literal + post-DNS checks (DNS is resolved and checked
+  before the request; classic DNS-rebinding — a record changing between the
+  check and the connection — is not prevented), IPv4/IPv6
   private/reserved blocklist (including embedded-IPv4 forms `::ffff:a.b.c.d`
   / NAT64), ≤5 redirect hops — **every hop is re-checked** (`fetchPublic`
   for enrichment/platforms/video sub-requests; `web_fetch` uses a
   same-origin redirect policy plus a literal check of the target).
-  `ssrf.trustEnvProxy` — opt-in for proxied hostnames;
+  `ssrf.trustEnvProxy` is accepted but does nothing (no-op);
   `fetch.allowPrivateNetworks` — explicit opt-in for private networks
   (off by default).
 - **Credentials**: engine API keys only via config
@@ -250,7 +252,9 @@ browser: `npx playwright install chromium` (readiness is exposed via
 text), `browser_screenshot` (PNG in the state dir, optionally
 inlined), `browser_click`/`browser_type`/`browser_evaluate` (per
 `approval`), `browser_close`. Configuration — the `browser` block (see the
-reference). SSRF check on open/navigate; timeouts on `page.goto` and
+reference). SSRF check on open/navigate (it runs before navigation and on
+the final URL — intermediate redirect hops are not checked, so a public host
+returning 302 to an internal address passes); timeouts on `page.goto` and
 operations; one tab by default (`maxConcurrentTabs`). v0.1 limits: basic
 auth profiles only (`browser.authProfiles`); multi-tab and persistent
 profiles are on the v1.1 plan.

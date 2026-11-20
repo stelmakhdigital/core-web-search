@@ -6,7 +6,9 @@
  *
  * The check runs twice: once on the literal hostname (catches IP-literal
  * URLs) and once after DNS resolution (catches domains that resolve to
- * private addresses, including DNS-rebinding). A request is allowed only if
+ * private addresses). It checks the DNS answer before the request; classic
+ * DNS-rebinding (the record changing between the check and the connection)
+ * is not prevented. A request is allowed only if
  * every resolved address is public. Embedded-IPv4 forms (IPv4-mapped
  * `::ffff:a.b.c.d`, IPv4-compatible `::a.b.c.d`, NAT64 `64:ff9b::a.b.c.d`)
  * are checked through their IPv4 tail, so `[::ffff:127.0.0.1]` is blocked
@@ -34,6 +36,10 @@ const IPV4_BLOCKED: Array<[number, number]> = [
   [0xac100000, 12], // 172.16.0.0/12 private
   [0xa9fe0000, 16], // 169.254.0.0/16 link-local (cloud metadata)
   [0xc0a80000, 16], // 192.168.0.0/16 private
+  [0x64400000, 10], // 100.64.0.0/10 carrier-grade NAT (Tailscale/CGNAT)
+  [0xc6120000, 15], // 198.18.0.0/15 benchmarking range
+  [0xe0000000, 4], // 224.0.0.0/4 multicast
+  [0xf0000000, 4], // 240.0.0.0/4 reserved
   [0xfc000000, 7], // fc00::/7 IPv6 ULA (kept here for symmetry; IPv6 handled separately)
 ]
 
@@ -189,8 +195,10 @@ export interface SsrfCheckResult {
 /**
  * Check a URL against the SSRF policy. The hostname is checked as a literal
  * (catches IP-literal URLs) and, when it is a domain, resolved via DNS and
- * every resolved address is checked (catches private domains and
- * DNS-rebinding). A URL is allowed only if every resolved address is public.
+ * every resolved address is checked (catches domains that resolve to private
+ * addresses; the check precedes the connection, so a record change after it —
+ * classic DNS-rebinding — is not prevented). A URL is allowed only if every
+ * resolved address is public.
  * @param url - the absolute http(s) URL to check.
  * @param options - optional overrides.
  * @param options.allowPrivate - when true, skip the check (allow all).

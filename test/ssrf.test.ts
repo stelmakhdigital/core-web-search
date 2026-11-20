@@ -41,6 +41,10 @@ describe('checkSsrf — IP literals (no DNS)', () => {
     ['http://127.0.0.1/', 'loopback'],
     ['http://169.254.169.254/', 'link-local (cloud metadata)'],
     ['http://0.0.0.0/', 'this network'],
+    ['http://100.64.0.1/', 'CGNAT (100.64/10, Tailscale)'],
+    ['http://198.18.0.1/', 'benchmark range (198.18/15)'],
+    ['http://224.0.0.1/', 'multicast (224/4)'],
+    ['http://240.0.0.0/', 'reserved (240/4)'],
   ])('blocks %s (%s)', async (url, _label) => {
     const result = await checkSsrf(url)
     expect(result.allowed).toBe(false)

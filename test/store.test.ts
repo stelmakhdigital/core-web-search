@@ -30,6 +30,33 @@ describe('WebStore — search records', () => {
     await store.close()
   })
 
+  it('upserts a search and keeps returning the row id (SELECT fallback)', async () => {
+    const store = makeStore()
+    const id1 = await store.recordSearch({
+      cacheKey: 'k1',
+      query: 'test query',
+      engines: ['ddg'],
+      createdAt: Date.now(),
+      sources: [{ title: 'Result 1', url: 'https://example.com' }],
+      truncated: false,
+    })
+    expect(id1).toBeGreaterThan(0)
+    // ON CONFLICT DO UPDATE creates no new row (lastInsertRowid stays 0):
+    // the fallback SELECT must return the original id, not 0.
+    const id2 = await store.recordSearch({
+      cacheKey: 'k1',
+      query: 'test query',
+      engines: ['ddg'],
+      createdAt: Date.now(),
+      sources: [{ url: 'https://example.com' }, { url: 'https://example.com/2' }],
+      truncated: false,
+    })
+    expect(id2).toBe(id1)
+    const byId = await store.getSearch(id1)
+    expect(byId!.sources).toHaveLength(2)
+    await store.close()
+  })
+
   it('returns undefined for a missing search', async () => {
     const store = makeStore()
     const read = await store.readSearch('missing')

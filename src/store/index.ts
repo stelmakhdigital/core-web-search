@@ -281,7 +281,12 @@ export class WebStore {
         entry.content ?? null,
       )
     this.maybeEvict(db)
-    return Number(result.lastInsertRowid)
+    const id = Number(result.lastInsertRowid)
+    if (id > 0) return id
+    // ON CONFLICT DO UPDATE creates no new row (lastInsertRowid stays 0):
+    // the record kept its original id.
+    const row = this.stmt(db, 'SELECT id FROM web_searches WHERE cache_key = ?').get(entry.cacheKey) as { id: number } | undefined
+    return row?.id ?? 0
   }
 
   /**

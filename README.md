@@ -111,13 +111,15 @@ web_fetch, curator-саммари) требуют `HostAdapter.llm` — без �
 
 Security-ревью 2026-09-21 (roadmap 6.3) — состояние:
 
-- **SSRF-гард**: литерал + post-DNS (rebinding), блок-список IPv4/IPv6
+- **SSRF-гард**: литерал + post-DNS (DNS-резолв проверяется до запроса;
+  классический DNS-rebinding — смена записи между проверкой и подключением —
+  не закрывается), блок-список IPv4/IPv6
   приватных и зарезервированных диапазонов (включая embedded-IPv4 формы
   `::ffff:a.b.c.d` / NAT64), `≤5` редирект-хопов — **каждый хоп проходит
   повторную проверку** (`fetchPublic`: search-enrichment, platforms,
   video-subrequests с 6.3; `web_fetch` — same-origin-политика на хопы +
-  литеральная проверка цели). `ssrf.trustEnvProxy` — оп-ин для
-  проксированных хостнеймов; `fetch.allowPrivateNetworks` — явный оп-ин на
+  литеральная проверка цели). `ssrf.trustEnvProxy` принимается, но ничего не
+  делает (no-op); `fetch.allowPrivateNetworks` — явный оп-ин на
   приватные сети (по умолчанию выключено).
 - **Креденшалы**: API-ключи движков — только через конфиг
   (`providers.*.apiKey`), host-креденшалы (`host.credential`) или env;
@@ -138,7 +140,7 @@ Security-ревью 2026-09-21 (roadmap 6.3) — состояние:
 
 Канал дистрибуции — **git** (решение 2026-09-21: пакеты не публикуются в
 npm; имена `@agents-web-search/*` сохранены как идентификаторы пакетов).
-Репозиторий адаптеров самодостаточен: core (pinned `v1.0.0`) лежит в нём
+Репозиторий адаптеров самодостаточен: core (pinned `v1.5.0`) лежит в нём
 тарболом (`.vendor/`), а DSH-плагин — предсобраным бандлом
 (`packages/dsh/lib/`) — клон ставится офлайн.
 
@@ -195,9 +197,9 @@ extension → fail-fast при старте Pi (6.4).
 (репозиторий содержит предсобранное `lib/`):
 
 ```sh
-pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+pnpm add git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
 # или npm:
-npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.0.0
+npm i git+https://github.com/stelmakhdigital/core-web-search.git#v1.5.0
 ```
 
 ## Как написать свой адаптер (HostAdapter)
@@ -281,7 +283,9 @@ isError: true}`.
 текст), `browser_screenshot` (PNG в state dir, опционально inline),
 `browser_click`/`browser_type`/`browser_evaluate` (по
 `approval`), `browser_close`. Настройки — блок `browser` (см. референс).
-SSRF-проверка на open/navigate; таймаут на `page.goto` и операции;
+SSRF-проверка на open/navigate (она выполняется до навигации и по финальному
+URL; промежуточные redirect-ходы не проверяются — публичный хост, отдающий
+302 на internal, пройдёт); таймаут на `page.goto` и операции;
 одна вкладка по умолчанию (`maxConcurrentTabs`). Ограничения v0.1:
 auth-профили — базовые (`browser.authProfiles`), мульти-вкладки и
 персистентные профили — в план v1.1.

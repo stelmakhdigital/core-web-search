@@ -3,7 +3,7 @@ import { createServer, type AddressInfo } from 'node:net'
 
 import { CoreError } from '../src/errors.ts'
 import type { SearchRequest, SearchResult, SearchSource } from '../src/types.ts'
-import { MULTI_SEARCH_PROVIDER_ID, MultiSearchProvider } from '../src/search/provider.ts'
+import { MULTI_SEARCH_PROVIDER_ID, MultiSearchProvider, searchCacheKey } from '../src/search/provider.ts'
 import { SearXNGEngine, SEARXNG_DEFAULT_ENDPOINT } from '../src/search/engines/searxng.ts'
 import { HttpSearchClient, dedupeSources, isBlockedDomain } from '../src/search/http.ts'
 import type { WebStore } from '../src/store/index.ts'
@@ -243,5 +243,54 @@ describe('fuse mode (parallel + RRF)', () => {
     expect(diag.find((engine) => engine.id === 'ddg')?.inChain).toBe(true)
     expect(diag.find((engine) => engine.id === 'exa')?.inChain).toBe(false)
     expect(diag.find((engine) => engine.id === 'ddg')?.available).toBe(true)
+  })
+})
+
+describe('search cache key includes maxResults', () => {
+  it('same query/engines/mode with different maxResults produce different keys', () => {
+    const five = searchCacheKey('hello world', ['ddg'], 'fallback', 5)
+    const twenty = searchCacheKey('hello world', ['ddg'], 'fallback', 20)
+    expect(five).not.toBe(twenty)
+    // Query normalization still applies; the same cap still hits the same key.
+    expect(searchCacheKey('Hello   WORLD', ['ddg'], 'fallback', 5)).toBe(five)
+  })
+
+  it('a cached 5-result page does not answer a 20-result request', async () => {
+    // A minimal store with real cache semantics (the shared makeStore always misses).
+    const rows = new Map<string, { id: number; createdAt: number; sources: unknown[]; truncated: boolean }>()
+    const store = {
+      readSearch: async (cacheKey: string) => rows.get(cacheKey),
+      recordSearch: async (entry: { cacheKey: string; sources: unknown[]; truncated: boolean }) => {
+        rows.set(entry.cacheKey, { id: 1, createdAt: Date.now(), sources: entry.sources, truncated: entry.truncated })
+        return 1
+      },
+    } as unknown as WebStore
+    const engine = makeEngine('a')
+    const provider = new MultiSearchProvider({
+      engines: ['a'],
+      mode: 'fallback',
+      defaultMaxResults: 5,
+      store,
+      engineById: new Map([['a', engine as never]]) as never,
+      enrich: false,
+      enrichFetchLimit: 0,
+      enrichKeep: 0,
+      searchCacheTtlMs: 60_000,
+      pageCacheTtlMs: 1000,
+      timeoutMs: 10_000,
+      cooldownBaseMs: 1000,
+      cooldownMaxMs: 4000,
+      enrichOptions: {} as never,
+    })
+    const first = await provider.search({ query: 'hello world', maxResults: 5 })
+    expect(first.fromCache).toBeUndefined()
+    // Same cap => cache hit, the engine does not run again.
+    const repeat = await provider.search({ query: 'hello world', maxResults: 5 })
+    expect(repeat.fromCache).toBe(true)
+    // Wider cap => cache miss, the engine runs again (regression: it was served
+    // the capped 5-result page with cache confidence).
+    const wider = await provider.search({ query: 'hello world', maxResults: 20 })
+    expect(wider.fromCache).toBeUndefined()
+    expect(engine.search).toHaveBeenCalledTimes(2)
   })
 })

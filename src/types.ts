@@ -320,9 +320,9 @@ export interface CoreConfig {
   }
   readonly ssrf?: {
     /**
-     * Opt-in: skip the local DNS preflight for hostnames proxied via
-     * HTTP_PROXY/HTTPS_PROXY/ALL_PROXY (NO_PROXY still validated; literal
-     * private targets always blocked). Default false.
+     * Accepted but not acted on: no code path reads it (the guard never
+     * trusts an env proxy).
+     * @deprecated no-op
      */
     readonly trustEnvProxy?: boolean
   }
