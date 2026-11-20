@@ -30,7 +30,7 @@ describe('WebStore — search records', () => {
     await store.close()
   })
 
-  it('upserts a search and keeps returning the row id (SELECT fallback)', async () => {
+  it('upserts a search and keeps returning the same row id', async () => {
     const store = makeStore()
     const id1 = await store.recordSearch({
       cacheKey: 'k1',
@@ -41,8 +41,7 @@ describe('WebStore — search records', () => {
       truncated: false,
     })
     expect(id1).toBeGreaterThan(0)
-    // ON CONFLICT DO UPDATE creates no new row (lastInsertRowid stays 0):
-    // the fallback SELECT must return the original id, not 0.
+    // DO UPDATE upserts keep last_insert_rowid pointing at the original row.
     const id2 = await store.recordSearch({
       cacheKey: 'k1',
       query: 'test query',

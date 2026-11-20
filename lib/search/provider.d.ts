@@ -86,12 +86,16 @@ export interface EngineDiagnostics {
     readonly consecutiveFailures: number;
 }
 /**
- * Build the search cache key from the normalized query, engine list, and
- * mode. @param query - the trimmed query.
+ * Build the search cache key from the normalized query, engine list, mode,
+ * and result cap (a cached 5-result page must not answer a 20-result
+ * request). `recency`/`domains` are deliberately absent: the router does not
+ * pass them to engines, so they do not change the stored result.
+ * @param query - the trimmed query.
  * @param engines - the ordered engine list.
  * @param mode - the routing mode.
+ * @param maxResults - the resolved result cap (omitted = any).
  * @returns the cache key.
  */
-export declare function searchCacheKey(query: string, engines: readonly string[], mode: string): string;
+export declare function searchCacheKey(query: string, engines: readonly string[], mode: string, maxResults?: number): string;
 /** Drop duplicate URLs across the merged list (first occurrence wins). */
 export declare function filterAndDedupe(sources: readonly SearchSource[]): SearchSource[];
