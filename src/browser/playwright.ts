@@ -40,6 +40,21 @@ export interface PlaywrightProviderConfig {
    * a trusted, network-isolated environment.
    */
   readonly allowPrivateNetworks?: boolean
+  /**
+   * Headless engine: `'chrome'` (default) launches the full Chromium build in
+   * new headless mode — a materially better fingerprint than the headless
+   * shell against bot checks (falls back to the shell when only the shell was
+   * downloaded); `'shell'` keeps the classic `chromium_headless_shell`.
+   */
+  readonly headlessMode?: 'shell' | 'chrome'
+  /**
+   * Context user agent. Default: derived from the launched build's real
+   * version with the `HeadlessChrome` token removed (matching the host OS
+   * family). Set to pin an explicit UA.
+   */
+  readonly userAgent?: string
+  /** Extra Chromium launch args (appended to the stealth defaults). */
+  readonly launchArgs?: readonly string[]
 }
 
 /** A minimal browser backend contract (the manager's provider surface). */
@@ -70,6 +85,48 @@ export async function assertPublicNavigation(url: string, allowPrivate: boolean)
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_TEXT_LENGTH = 20_000
 const DEFAULT_MAX_ELEMENTS = 200
+
+/**
+ * Launch hardening applied by default: removes the `navigator.webdriver`
+ * automation marker. This is fingerprint hygiene, not fingerprint spoofing —
+ * the provider does not fake plugins/screens beyond the UA.
+ */
+export const STEALTH_ARGS: readonly string[] = ['--disable-blink-features=AutomationControlled']
+
+/** UA platform token matching the host OS family. */
+function platformToken(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') return 'Macintosh; Intel Mac OS X 10_15_7'
+  if (platform === 'win32') return 'Windows NT 10.0; Win64; x64'
+  return 'X11; Linux x86_64'
+}
+
+/**
+ * The context user agent: explicit override wins; otherwise a Chrome UA
+ * derived from the launched build's version — Playwright's `Browser.version()`
+ * returns a bare number (`159.0.8154.6`), while UA strings carry
+ * `Chrome/…`/`HeadlessChrome/…`; both shapes map to `Chrome/<major>.0.0.0`.
+ * Undefined when no version is known (the browser default UA stays).
+ */
+export function contextUserAgent(version: string | undefined, override: string | undefined, platform?: NodeJS.Platform): string | undefined {
+  if (override !== undefined) return override
+  const v = version ?? ''
+  const major = /(?:Headless)?Chrome\/(\d+)/.exec(v)?.[1] ?? /^(\d+)\./.exec(v)?.[1]
+  if (major === undefined) return undefined
+  return `Mozilla/5.0 (${platformToken(platform)}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+}
+
+/**
+ * `browser.version()` guarded — the real Playwright browser always has it, but
+ * a custom/mocked provider might not, and a missing version string must not
+ * break the open flow (UA derivation then no-ops).
+ */
+function safeBrowserVersion(browser: Browser): string | undefined {
+  try {
+    return typeof browser.version === 'function' ? browser.version() : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /** The playwright package, loaded lazily (see {@link loadPlaywright}). */
 type PlaywrightModule = typeof import('playwright')
@@ -195,6 +252,9 @@ function collectFrameElements(params: { selector: string; start: number }): { el
 export class PlaywrightProvider implements CoreBrowserProvider {
   readonly id = 'playwright'
   private readonly headless: boolean
+  private readonly headlessMode: 'shell' | 'chrome'
+  private readonly userAgent: string | undefined
+  private readonly launchArgs: readonly string[]
   private readonly timeoutMs: number
   private readonly authProfiles: Record<string, string>
   private readonly maxTextLength: number
@@ -203,6 +263,9 @@ export class PlaywrightProvider implements CoreBrowserProvider {
 
   constructor(config: PlaywrightProviderConfig = {}) {
     this.headless = config.headless ?? true
+    this.headlessMode = config.headlessMode ?? 'chrome'
+    this.userAgent = config.userAgent
+    this.launchArgs = config.launchArgs ?? []
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.authProfiles = config.authProfiles ?? {}
     this.maxTextLength = DEFAULT_MAX_TEXT_LENGTH
@@ -239,12 +302,30 @@ export class PlaywrightProvider implements CoreBrowserProvider {
       )
     }
     const storageState = this.resolveStorageState(options.authProfile)
-    const browser = await pw.chromium.launch({ headless: options.headless ?? this.headless })
+    const headless = options.headless ?? this.headless
+    const useFullChrome = headless && this.headlessMode === 'chrome'
+    const launch = (fullChrome: boolean): Promise<Browser> =>
+      pw.chromium.launch({
+        headless,
+        ...(fullChrome ? { channel: 'chromium' } : {}),
+        args: [...STEALTH_ARGS, ...this.launchArgs],
+      })
+    let browser: Browser
+    try {
+      browser = await launch(useFullChrome)
+    } catch (error: unknown) {
+      // Only the headless shell was ever downloaded (`playwright install
+      // chromium --only-shell`): fall back instead of failing the action.
+      if (!useFullChrome) throw error
+      browser = await launch(false)
+    }
     // A failure below (e.g. an unreadable storageState) must not leak the
     // just-launched Chromium process.
     try {
-      const contextOptions: { storageState?: string } = {}
+      const contextOptions: { storageState?: string; userAgent?: string } = {}
       if (storageState !== undefined) contextOptions.storageState = storageState
+      const ua = contextUserAgent(safeBrowserVersion(browser), this.userAgent)
+      if (ua !== undefined) contextOptions.userAgent = ua
       const context = await browser.newContext(contextOptions)
       const page = await context.newPage()
       return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements, this.allowPrivateNetworks)

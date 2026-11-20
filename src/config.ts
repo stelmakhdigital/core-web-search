@@ -89,6 +89,12 @@ export interface ResolvedCoreConfig {
   readonly browser: {
     readonly enabled: boolean
     readonly headless: boolean
+    /** Headless engine: full Chromium in new-headless (default) or classic shell. */
+    readonly headlessMode: 'shell' | 'chrome'
+    /** Context UA override; undefined derives a Chrome UA from the build. */
+    readonly userAgent: string | undefined
+    /** Extra Chromium launch args (appended to the stealth defaults). */
+    readonly launchArgs: readonly string[]
     readonly approval: 'never' | 'navigate' | 'all'
     readonly allowPrivateNetworks: boolean
     readonly maxConcurrentTabs: number
@@ -255,6 +261,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   const browser = {
     enabled: b.enabled ?? false,
     headless: b.headless ?? true,
+    headlessMode: b.headlessMode ?? 'chrome',
+    userAgent: b.userAgent,
+    launchArgs: b.launchArgs ?? [],
     approval: b.approval ?? 'navigate',
     allowPrivateNetworks: b.allowPrivateNetworks ?? false,
     maxConcurrentTabs: b.maxConcurrentTabs ?? 1,
@@ -264,6 +273,9 @@ export function resolveCoreConfig(partial: CoreConfig | undefined, stateDir: str
   }
   assertPositiveInt('browser.maxConcurrentTabs', browser.maxConcurrentTabs)
   assertPositiveInt('browser.timeoutMs', browser.timeoutMs)
+  if (browser.headlessMode !== 'shell' && browser.headlessMode !== 'chrome') {
+    throw new CoreError(`browser.headlessMode must be shell|chrome (got "${browser.headlessMode}")`, 'WEB_BAD_REQUEST')
+  }
   if (browser.approval !== 'never' && browser.approval !== 'navigate' && browser.approval !== 'all') {
     throw new CoreError(`browser.approval must be one of never|navigate|all (got "${browser.approval}")`, 'WEB_BAD_REQUEST')
   }

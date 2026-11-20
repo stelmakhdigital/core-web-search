@@ -19,6 +19,12 @@ import { PlaywrightProvider, type CoreBrowserProvider } from './playwright.ts'
 export interface BrowserManagerOptions {
   /** Headless by default. */
   readonly headless?: boolean
+  /** Headless engine (full Chromium new-headless by default, or classic shell). */
+  readonly headlessMode?: 'shell' | 'chrome'
+  /** Context UA override (undefined derives a Chrome UA from the build). */
+  readonly userAgent?: string
+  /** Extra Chromium launch args (appended to the stealth defaults). */
+  readonly launchArgs?: readonly string[]
   /** Default per-action timeout (ms). */
   readonly timeoutMs?: number
   /** Auth profiles: name → storage-state file path. */
@@ -63,6 +69,9 @@ export const ANON_KEY = Symbol('browser-anon-session')
 export function createBrowserManager(options: BrowserManagerOptions = {}): BrowserManager {
   const provider: CoreBrowserProvider = options.provider ?? new PlaywrightProvider({
     headless: options.headless,
+    headlessMode: options.headlessMode,
+    userAgent: options.userAgent,
+    launchArgs: options.launchArgs,
     timeoutMs: options.timeoutMs,
     authProfiles: options.authProfiles,
     allowPrivateNetworks: options.allowPrivateNetworks,

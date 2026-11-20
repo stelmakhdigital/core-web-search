@@ -29,7 +29,7 @@ const mock = vi.hoisted(() => {
     executablePath: () => '/fake/chromium' as string | (() => string),
     launchError: undefined as Error | undefined,
   })
-  const state = { ...defaults(), launched: 0, browserClosed: 0 }
+  const state = { ...defaults(), launched: 0, browserClosed: 0, launchOptions: undefined as Record<string, unknown> | undefined, contextOptions: undefined as Record<string, unknown> | undefined }
   const gotos: string[] = []
   const clicks: string[] = []
   const fills: { selector: string; text: string }[] = []
@@ -88,7 +88,11 @@ const mock = vi.hoisted(() => {
   }
 
   const browser = {
-    newContext: async (_options: Record<string, unknown>) => ({ newPage: async () => page }),
+    version: () => 'HeadlessChrome/159.0.8154.6',
+    newContext: async (options: Record<string, unknown>) => {
+      state.contextOptions = options
+      return { newPage: async () => page }
+    },
     close: async (): Promise<void> => {
       state.browserClosed += 1
     },
@@ -96,8 +100,9 @@ const mock = vi.hoisted(() => {
 
   const chromium = {
     executablePath: () => (state.executablePath as () => string)(),
-    launch: async (): Promise<unknown> => {
+    launch: async (options?: Record<string, unknown>): Promise<unknown> => {
       state.launched += 1
+      state.launchOptions = options
       if (state.launchError !== undefined) throw state.launchError
       return browser
     },
@@ -111,7 +116,7 @@ const mock = vi.hoisted(() => {
     fills,
     screenshots,
     reset(): void {
-      Object.assign(state, defaults(), { launched: 0, browserClosed: 0 })
+      Object.assign(state, defaults(), { launched: 0, browserClosed: 0, launchOptions: undefined, contextOptions: undefined })
       gotos.length = 0
       clicks.length = 0
       fills.length = 0
@@ -146,6 +151,30 @@ describe('PlaywrightProvider session (mocked playwright)', () => {
     expect(result).toEqual({ url: 'https://example.com/?a=1', title: 'Test Page' })
     expect(mock.gotos).toEqual(['https://example.com/?a=1'])
     expect(mock.state.launched).toBe(1)
+  })
+
+  it('launch hardening: stealth args, full-Chromium channel, Headless-free UA', async () => {
+    await openSession()
+    const launch = mock.state.launchOptions as Record<string, unknown>
+    expect(launch.channel).toBe('chromium')
+    expect(launch.args).toContain('--disable-blink-features=AutomationControlled')
+    const ctx = mock.state.contextOptions as Record<string, unknown>
+    expect(String(ctx.userAgent)).toContain('Chrome/159.0.0.0')
+    expect(String(ctx.userAgent)).not.toContain('Headless')
+  })
+
+  it('headlessMode shell keeps the classic shell (no channel)', async () => {
+    const provider = new PlaywrightProvider({ headless: true, headlessMode: 'shell' })
+    await provider.open({}, undefined)
+    const launch = mock.state.launchOptions as Record<string, unknown>
+    expect(launch.channel).toBeUndefined()
+  })
+
+  it('full-Chromium launch failure falls back to the shell before giving up', async () => {
+    mock.state.launchError = new Error('Executable does not exist, run playwright install')
+    await expect(openSession()).rejects.toThrow()
+    // chrome attempt + shell fallback — both surface the mock error
+    expect(mock.state.launched).toBe(2)
   })
 
   it('blocks a literal private navigation before any browser work (SSRF)', async () => {

@@ -86,6 +86,12 @@ export interface ResolvedCoreConfig {
     readonly browser: {
         readonly enabled: boolean;
         readonly headless: boolean;
+        /** Headless engine: full Chromium in new-headless (default) or classic shell. */
+        readonly headlessMode: 'shell' | 'chrome';
+        /** Context UA override; undefined derives a Chrome UA from the build. */
+        readonly userAgent: string | undefined;
+        /** Extra Chromium launch args (appended to the stealth defaults). */
+        readonly launchArgs: readonly string[];
         readonly approval: 'never' | 'navigate' | 'all';
         readonly allowPrivateNetworks: boolean;
         readonly maxConcurrentTabs: number;

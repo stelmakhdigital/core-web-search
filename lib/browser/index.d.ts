@@ -5,7 +5,7 @@
  * @module @agents-web-search/core/browser
  */
 export { type BrowserElement, type BrowserNavigateResult, type BrowserOpenOptions, type BrowserScreenshot, type BrowserScreenshotOptions, type BrowserSession, type BrowserSnapshot, type BrowserSnapshotOptions, type BrowserTarget, BROWSER_CODES, type BrowserCode, } from './types.ts';
-export { assertPublicNavigation, loadPlaywright, PlaywrightProvider, type CoreBrowserProvider, type PlaywrightProviderConfig, } from './playwright.ts';
+export { assertPublicNavigation, contextUserAgent, loadPlaywright, PlaywrightProvider, STEALTH_ARGS, type CoreBrowserProvider, type PlaywrightProviderConfig, } from './playwright.ts';
 export { ANON_KEY, createBrowserManager, type BrowserManager, type BrowserManagerOptions } from './manager.ts';
 export { buildBrowserTools, type BrowserToolDeps } from './tools.ts';
 export { browserReadiness, detectDistroFamily, lddMissingLibs, type BrowserReadiness, type ReadinessDeps, } from './readiness.ts';
